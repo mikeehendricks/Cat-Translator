@@ -31,6 +31,12 @@
 - Fixed while doing it: the record button's state class was applied backwards (the "recording" style
   showed at rest), and an empty translation no longer renders a card that says "0 meows" — the empty
   state stays until there is something to say.
+- **`install.sh --local` no longer copies the world.** A development checkout can hold a repository,
+  installed dependencies, caches and a data directory; `cp -a` of the tree staged all of it, and if
+  that data directory sat inside the tree the copy fed itself back in until the disk filled (it did,
+  during this release: 3 GB in seconds). The payload is now assembled with the same exclusions the
+  rsync path already had, plus the resolved data directory wherever it lives, and the installer
+  refuses a payload over 256 MB with a message saying what probably got in.
 
 ## 1.0.8
 

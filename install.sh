@@ -188,8 +188,23 @@ STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 if [ "$SOURCE_MODE" = local ]; then
   say "installing from $SCRIPT_DIR"
-  cp -a "$SCRIPT_DIR/." "$STAGE/"
-  rm -rf "$STAGE/.git" "$STAGE/node_modules" "$STAGE/data"
+  # Copy the application, never the things that are not the application. A
+  # development checkout can hold a repository, installed dependencies, caches
+  # and — if the data directory was left at its default — runtime state,
+  # including the store's own copies of earlier installs. Copying that back into
+  # itself is an infinite regress that fills the disk, so the data directory is
+  # excluded explicitly, wherever it lives.
+  DATA_REL=""
+  case "$DATA_DIR" in
+    "$SCRIPT_DIR"/*) DATA_REL="./${DATA_DIR#"$SCRIPT_DIR"/}" ;;
+  esac
+  tar -C "$SCRIPT_DIR" \
+    --exclude='./.git' --exclude='./node_modules' --exclude='./.npm' \
+    --exclude='./.cache' --exclude='./.local' --exclude='./.arena' \
+    --exclude='./data' --exclude='./versions' --exclude='./staging' \
+    --exclude='./local' --exclude='*.log' \
+    ${DATA_REL:+--exclude="$DATA_REL"} \
+    -cf - . | tar -C "$STAGE" -xf -
 else
   URL="${GITHUB_URL:-https://codeload.github.com/$REPO_DEFAULT/tar.gz/$BRANCH_DEFAULT}"
   say "downloading $URL"
@@ -203,6 +218,13 @@ else
   STAGE="$STAGE/tree"
 fi
 [ -f "$STAGE/server/server.js" ] || die "server/server.js is missing from the payload"
+STAGE_KB="$(du -sk "$STAGE" | cut -f1)"
+if [ "${STAGE_KB:-0}" -gt 262144 ]; then
+  die "the payload is ${STAGE_KB} kB, which is far larger than this application \
+(about 20 MB). Something else is inside the source tree — most likely a data or \
+backup directory. Move it out, or delete it, and run the installer again."
+fi
+say "payload: ${STAGE_KB} kB"
 
 # copy over the live tree, keeping anything the update system protects
 say "installing into $APP_DIR"

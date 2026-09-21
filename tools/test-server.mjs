@@ -229,6 +229,37 @@ async function waitForHealth(timeoutMs) {
   /* ---- 0c. install.sh syntax --------------------------------------------- */
   const bashCheck = spawnSync('bash', ['-n', path.join(APP, 'install.sh')], { encoding: 'utf8' });
   check('install.sh parses (bash -n)', bashCheck.status === 0, bashCheck.stderr.trim());
+
+  /* A local install must copy the application and not a data directory that
+     happens to sit inside the source tree. It once copied its own output back
+     into itself until the disk was full, so the exclusion list is exercised
+     here for real, with the same flags the installer uses. */
+  {
+    const script = fs.readFileSync(path.join(ROOT, 'install.sh'), 'utf8');
+    const excludes = (script.match(/--exclude='\.\/[^']+'/g) || []);
+    check('the installer excludes runtime state and caches from a local install',
+      excludes.includes("--exclude='./data'") && excludes.includes("--exclude='./node_modules'") &&
+      excludes.includes("--exclude='./.git'") && excludes.length >= 8,
+      excludes.join(' '));
+    check('the installer refuses a payload far larger than the application',
+      /STAGE_KB/.test(script) && /-gt 262144/.test(script));
+
+    const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'meow-stage-'));
+    const src = path.join(scratch, 'src'), out = path.join(scratch, 'out');
+    fs.mkdirSync(path.join(src, 'server'), { recursive: true });
+    fs.mkdirSync(path.join(src, 'data', 'versions', 'install-old'), { recursive: true });
+    fs.writeFileSync(path.join(src, 'server', 'server.js'), '// app\n');
+    fs.writeFileSync(path.join(src, 'VERSION'), '9.9.9\n');
+    fs.writeFileSync(path.join(src, 'data', 'store.json'), '{"big":true}\n');
+    fs.writeFileSync(path.join(src, 'data', 'versions', 'install-old', 'copy.js'), '// old install\n');
+    fs.mkdirSync(out, { recursive: true });
+    const tarFlags = excludes.map(e => e.replace(/^--exclude='\.\//, "--exclude='./"));
+    const copy = spawnSync('bash', ['-c',
+      `tar -C ${JSON.stringify(src)} ${tarFlags.join(' ')} -cf - . | tar -C ${JSON.stringify(out)} -xf -`]);
+    check('a staged local copy leaves the data directory behind', copy.status === 0 &&
+      !fs.existsSync(path.join(out, 'data')) && fs.existsSync(path.join(out, 'server', 'server.js')));
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
   const unCheck = spawnSync('bash', ['-n', path.join(APP, 'uninstall.sh')], { encoding: 'utf8' });
   check('uninstall.sh parses (bash -n)', unCheck.status === 0, unCheck.stderr.trim());
   const cli = fs.readFileSync(path.join(APP, 'bin', 'meow-translator'), 'utf8');

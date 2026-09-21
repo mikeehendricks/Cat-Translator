@@ -368,7 +368,7 @@ node tools/verify-bundle.mjs    # the same, through the shipped single file: 18/
 ## Tests
 
 ```bash
-node tools/test-server.mjs                       # 76 checks: install, auth, visits, updates, rollback
+node tools/test-server.mjs                       # 79 checks: install, auth, visits, updates, rollback
 node tools/test-ui.mjs                           # 71 checks: the app's UI and the interface guidelines
 node tools/test-installed.mjs http://127.0.0.1:8899   # verify a running installation over HTTP
 node server/selftest.js                          # the smoke test the updater runs
