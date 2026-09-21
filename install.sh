@@ -212,7 +212,11 @@ say "writing $CONF_DIR/config.json"
 if [ -f "$CONF_DIR/config.json" ]; then
   cp "$CONF_DIR/config.json" "$CONF_DIR/config.json.bak-$(date +%s)"
 fi
-TRUST_PROXY=false
+# Keep a trustProxy setting from a previous install unless nginx is being set up
+# now: re-running the installer must not silently stop logging real visitor IPs.
+EXISTING_TRUST="$(grep -o '"trustProxy"[[:space:]]*:[[:space:]]*\(true\|false\)' "$CONF_DIR/config.json" 2>/dev/null \
+  | grep -o 'true\|false' | head -1 || true)"
+TRUST_PROXY="${EXISTING_TRUST:-false}"
 [ "$WITH_NGINX" = 1 ] && TRUST_PROXY=true
 cat > "$CONF_DIR/config.json" <<JSON
 {
@@ -370,11 +374,34 @@ else
 fi
 
 # --------------------------------------------------------------------- report
+if printf '%s' "$SETUP_TOKEN" | grep -qE '^[A-Za-z0-9_-]{20,}$'; then
+  TOKEN_BLOCK="  One-time admin setup token (registration only works once):
+
+      $SETUP_TOKEN
+
+  Open the admin panel and paste it to create your admin account:"
+elif [ -n "$SETUP_TOKEN" ]; then
+  TOKEN_BLOCK="  Registration is already complete on this instance, so the service kept the
+  existing account. Sign in at the admin panel, or reset the password with:
+
+      sudo meow-translator reset-password
+
+  Admin panel:"
+else
+  TOKEN_BLOCK="  The setup token was not readable yet. Get it with:
+
+      sudo meow-translator token
+
+  Admin panel:"
+fi
+
 cat <<REPORT
 
 $(printf '%s' "$C_OK")
 
   Meow translator v${VERSION:-?} is installed.
+
+$(printf '%s' "$TOKEN_BLOCK")
 
     app        ${URL}
     admin      ${URL%/}/admin
@@ -383,10 +410,6 @@ $(printf '%s' "$C_OK")
     files      $APP_DIR          (code, replaced by updates)
     data       $DATA_DIR         (visits, credentials, settings — survives updates)
     config     $CONF_DIR/config.json
-
-  One-time admin setup token (registration only works once):
-
-      ${SETUP_TOKEN:-<not readable yet — run: sudo meow-translator token>}
 
   Open ${URL%/}/admin and use that token to create your admin account.
 

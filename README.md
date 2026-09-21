@@ -151,6 +151,58 @@ setting for a private repo and think of it as "deploying from my own repo", beca
 
 ---
 
+## Publishing to GitHub
+
+The repository is the update source, so pushing is how you release. The token must be able to
+**write** to the repository:
+
+| token type | what it needs |
+|---|---|
+| fine-grained (`github.com/settings/tokens?type=beta`) | Repository access: this repo · **Contents: Read and write** |
+| classic (`github.com/settings/tokens`) | scope **`public_repo`** (this repo is public) or **`repo`** (private) |
+
+A read-only token fails with `Resource not accessible by personal access token` (403) from the API,
+or `Permission ... denied` from git. `tools/push-to-github.sh` checks for write access first and
+tells you which one you hit:
+
+```bash
+GITHUB_TOKEN=<token with Contents: Read and write> ./tools/push-to-github.sh
+```
+
+It pushes `main` using a credential helper that reads the token from the environment, so the token
+never lands in `.git/config`, in the process list, or in the shell history file.
+
+**Releasing a new version** means: bump `VERSION`, commit, push. Installed servers then see it:
+
+```bash
+sudo meow-translator update --check     # or the Updates tab in /admin
+```
+
+Rebuild `cat-translator.html` (`node tools/build-app.mjs`) before bumping if you changed anything in
+`src/` — CI fails the push if the committed bundle does not match its sources.
+
+---
+
+## Troubleshooting
+
+| symptom | cause and fix |
+|---|---|
+| recordings don't work, "microphone unavailable" | browsers need a secure context. Serve over HTTPS (`sudo meow-translator setup-https your.domain.com`) or use localhost. |
+| every visitor is logged as `127.0.0.1` | the app is behind a proxy but `trustProxy` is false. Set it in `/etc/meow-translator/config.json` (or let `setup-https` do it) and restart. |
+| location column stays "looking up…" | outbound HTTPS is blocked, or lookups are off. Check with `sudo meow-translator geo-probe` and the Settings tab. |
+| update check fails with "VERSION not found" | the repository is not a valid update source yet — `VERSION` must exist at the root of the branch you follow. |
+| update check fails with "rate limit reached" | set a GitHub token in Settings (it also lets a private fork be used). |
+| service won't start after an update | `sudo meow-translator rollback` restores the previous version; `journalctl -u meow-translator -n 50` shows why. |
+| service stopped and never came back | the unit needs `Restart=always` for the updater's exit-and-return restart. `sudo meow-translator install-service` rewrites it from the deployed template. |
+| forgot the admin password | `sudo meow-translator reset-password` (also signs out every session). |
+| forgot the setup token | `sudo meow-translator token` prints it; `--rotate` mints a new one. |
+| "registration is closed" and you want a fresh install | `sudo meow-translator reset-password` claims the account directly, or remove the store with `sudo rm /var/lib/meow-translator/store.json` and restart (this deletes visits too). |
+
+Logs: `journalctl -u meow-translator -f` · Data: `/var/lib/meow-translator` · Backups:
+`sudo meow-translator backup`.
+
+---
+
 ## The command line
 
 ```bash

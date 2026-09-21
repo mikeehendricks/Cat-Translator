@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Smoke test the tree (what an update runs)
+        run: node server/selftest.js
+
+      - name: Server test suite (install, auth, visits, update, rollback)
+        run: node tools/test-server.mjs
+
+      - name: Install the test dependency
+        run: npm install --no-save jsdom
+
+      - name: App UI test
+        run: node tools/test-ui.mjs
+
+      - name: The shipped single file still round-trips
+        run: node tools/verify-bundle.mjs
+
+      - name: The committed app matches its sources
+        run: |
+          node tools/build-app.mjs
+          if ! git diff --quiet cat-translator.html; then
+            echo "::error::cat-translator.html is out of date — run 'node tools/build-app.mjs' and commit the result"
+            git --no-pager diff --stat cat-translator.html
+            exit 1
+          fi
+
+      - name: The installer scripts parse
+        run: |
+          bash -n install.sh
+          bash -n uninstall.sh
+          bash -n tools/push-to-github.sh
+          node --check bin/meow-translator

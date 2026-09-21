@@ -429,6 +429,9 @@ async function waitForHealth(timeoutMs) {
 
   /* ------------------------------------------------------------------ done */
   await stopServer();
+  /* A self-restarted service is a detached process, so the harness cannot wait
+     on it — sweep anything still pointing at this throwaway directory. */
+  spawnSync('bash', ['-c', `pkill -f ${JSON.stringify(TMP)} 2>/dev/null || true`]);
   gh.close();
   console.log(`\n  ${pass} passed, ${fail} failed`);
   if (fail) {
