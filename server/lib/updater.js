@@ -225,7 +225,15 @@ class Updater {
       restorable: !!(v.dir && fs.existsSync(v.dir)),
       current: v.sha ? v.sha === this.store.data.app.sha : v.version === this.store.data.app.version,
       sizeBytes: v.dir && fs.existsSync(v.dir) ? dirSize(v.dir) : 0,
-    })).map((v, i, arr) => Object.assign(v, { current: i === 0 }));
+      /* "running" has to mean exactly one row. Matching on the version alone is
+         not enough: several snapshots can carry the same version number (an
+         install snapshot, a pre-update snapshot, a rollback target), and then the
+         panel pointed at all of them at once. A snapshot is only what is
+         deployed if it is the one that was restored, or its commit is the one
+         running. A build that came from GitHub is not a snapshot at all. */
+      current: !!(v.dir && v.dir === this.store.data.app.restoredFrom) ||
+        !!(v.sha && this.store.data.app.sha && v.sha === this.store.data.app.sha),
+    }));
   }
 
   /** Backup the live tree into the versions store. Returns the backup dir. */
@@ -486,6 +494,7 @@ class Updater {
       sha: entry.sha || '',
       installedAt: Date.now(),
       source: 'rollback',
+      restoredFrom: entry.dir || null,     // so the panel can say which row is running
     };
     this.store.save();
     /* Bookkeeping after the swap is deliberately non-fatal: the files are already

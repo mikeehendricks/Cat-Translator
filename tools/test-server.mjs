@@ -18,8 +18,24 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'meow-e2e-'));
 const APP = path.join(TMP, 'app');
 const DATA = path.join(TMP, 'data');
 const ETC = path.join(TMP, 'etc');
-const PORT = 18000 + Math.floor(Math.random() * 2000);
-const GH_PORT = PORT + 1;
+/**
+ * A crashed run used to leave its server behind, and the next run could pick the
+ * same random port — so the test would drive a *stale* server from an earlier
+ * workspace, with a different store. Ask the operating system for a free port
+ * instead, and insist it is still free just before starting.
+ */
+async function freePort() {
+  const net = await import('node:net');
+  return await new Promise(resolve => {
+    const probe = net.createServer();
+    probe.listen(0, '127.0.0.1', () => {
+      const port = probe.address().port;
+      probe.close(() => resolve(port));
+    });
+  });
+}
+let PORT = 0;           /* chosen at startup, once we know the machine is quiet */
+let GH_PORT = 0;
 /** The version the staged tree pretends to be installed as, and the version the
  *  stand-in GitHub offers. Both are pinned here on purpose: the suite must not
  *  depend on whatever VERSION the workspace happens to carry. */
@@ -190,7 +206,9 @@ async function waitForHealth(timeoutMs) {
 /* ------------------------------------------------------------------------ main */
 
 (async () => {
-  console.log(`\n\x1b[1mMeow translator server test\x1b[0m   workspace ${TMP}\n`);
+  PORT = await freePort();
+  GH_PORT = PORT + 1;
+  console.log(`\n\x1b[1mMeow translator server test\x1b[0m   workspace ${TMP}   port ${PORT}\n`);
 
   /* ---- 0. stage an "installed" tree --------------------------------------- */
   fs.mkdirSync(APP, { recursive: true });
@@ -218,6 +236,22 @@ async function waitForHealth(timeoutMs) {
   check('meow-translator CLI parses', cliSyntax.status === 0, cliSyntax.stderr.trim());
 
   /* ---- 1. boot ------------------------------------------------------------ */
+  /* nothing may be listening yet: a leftover server here means the whole run
+     would be talking to somebody else's store */
+  const net = await import('node:net');
+  for (const p of [PORT, GH_PORT]) {
+    const taken = await new Promise(resolve => {
+      const srv = net.createServer();
+      srv.once('error', () => resolve(true));
+      srv.once('listening', () => srv.close(() => resolve(false)));
+      srv.listen(p, '127.0.0.1');
+    });
+    if (taken) {
+      console.error(`\n  port ${p} is already in use — a server from an earlier test run is still alive.`);
+      console.error('  find it with:  ps -eo pid,args | grep server.js   then kill that pid\n');
+      process.exit(2);
+    }
+  }
   remoteTarball = buildTarball(REMOTE_VERSION, REMOTE_SHA);
   const gh = await startFakeGitHub();
   startServer();
@@ -316,6 +350,12 @@ async function waitForHealth(timeoutMs) {
   const history = await post('/api/admin/updates/check', {});   // re-auth context is unchanged: session survives
   const histRes = await get('/api/admin/updates', { headers: { cookie: cookies } });
   check('update history lists both versions', histRes.body.history.length >= 2, JSON.stringify(histRes.body.history.map(h => h.version)));
+  /* the newest snapshot is the pre-update state — the version you would roll
+     back TO. Labelling it "running" would point the operator at the wrong row. */
+  check('the newest snapshot is not labelled as the running version',
+    histRes.body.history[0].current === false,
+    'history[0] is v' + histRes.body.history[0].version + ' current=' + histRes.body.history[0].current +
+    ' while the running version is ' + REMOTE_VERSION);
   check('a rollback target is available', histRes.body.history.some(h => h.restorable && !h.current));
 
   const beforeRollback = await waitForHealth(5000);
@@ -326,6 +366,27 @@ async function waitForHealth(timeoutMs) {
     `instance before ${beforeRollback && beforeRollback.instanceId}, after ${back2 && back2.instanceId}`);
   check(`the rolled-back service runs v${BASE_VERSION} again`, back2 && back2.version === BASE_VERSION, back2 && back2.version);
   check('the version file was restored', fs.readFileSync(path.join(APP, 'VERSION'), 'utf8').trim() === BASE_VERSION);
+  /* the restarted process does not inherit the in-memory session cookie, so sign
+     in again — which is also the state an operator would be in */
+  /* The replacement process is detached, and in this development restart mode a
+     second replacement can briefly answer alongside the first, so give the panel
+     a moment to settle before asking an authenticated question. */
+  let hist2 = { status: 0, body: null };
+  for (let i = 0; i < 12; i++) {
+    const relog = await post('/api/admin/login', { username: 'mike', password: 'meow-meow-123' });
+    if (relog.status === 200 && relog.body.session) {
+      setCookie(relog.res);
+      csrf = relog.body.session.csrf;      // a fresh login means a fresh CSRF token
+    }
+    hist2 = await get('/api/admin/updates', authed());
+    if (hist2.status === 200) break;
+    await sleep(500);
+  }
+  const flagged = (hist2.body && hist2.body.history || []).filter(h => h.current);
+  check('after a rollback exactly one snapshot is flagged as running',
+    flagged.length === 1 && flagged[0].version === BASE_VERSION,
+    `status ${hist2.status} keys ${hist2.body && typeof hist2.body === 'object' ? Object.keys(hist2.body).join(',') : typeof hist2.body} ` +
+    JSON.stringify((hist2.body && hist2.body.history || []).slice(0, 4).map(h => 'v' + h.version + ':' + h.current)));
 
   /* ---- 9. a failed update must not touch the live tree ------------------ */
   failDownloads = true;

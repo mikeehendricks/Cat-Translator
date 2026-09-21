@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.5
+
+- **The updates list marks the right row as running.** It used to mark the newest snapshot, which is
+  the *pre-update* state — the version you would roll back to — and, because several snapshots can
+  share a version number, it could mark several rows at once. A row is now marked only if it is the
+  snapshot that was actually restored, or its commit is the one running.
+- The server test picks a free port and refuses to start if one is already answering, after a
+  crashed run left a server behind and the next run talked to that stale process instead of its own.
+
 ## 1.0.4
 
 - **An undeletable old snapshot no longer aborts an update.** The service can only prune snapshots
