@@ -27,7 +27,7 @@
   permission bits — proves unpacking works with no tar on `PATH`, and proves the hostile archives
   above are refused. `tools/test-server.mjs` now runs the *entire* suite with a tar that always
   fails, so every update and rollback in it is exercised on a machine like the one that reported
-  this: 82 checks, and a check that tar was never called once.
+  this: 83 checks, and a check that tar was never called once.
 
 ## 1.0.9
 

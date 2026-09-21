@@ -373,7 +373,7 @@ node tools/verify-bundle.mjs    # the same, through the shipped single file: 18/
 ## Tests
 
 ```bash
-node tools/test-server.mjs                       # 82 checks: install, auth, visits, updates, rollback
+node tools/test-server.mjs                       # 83 checks: install, auth, visits, updates, rollback
 node tools/test-ui.mjs                           # 71 checks: the app's UI and the interface guidelines
 node tools/test-installed.mjs http://127.0.0.1:8899   # verify a running installation over HTTP
 node tools/test-archive.mjs                      # 32 checks: the tar reader/writer the updater uses

@@ -284,6 +284,21 @@ async function waitForHealth(timeoutMs) {
     fs.rmSync(scratch, { recursive: true, force: true });
   }
   const unCheck = spawnSync('bash', ['-n', path.join(APP, 'uninstall.sh')], { encoding: 'utf8' });
+  /* Packaging guard. These files are meant to be run, and a tree that lost its
+     executable bits (a checkout that normalised permissions, a copy that did
+     not preserve them) would ship a package where `./install.sh` fails with
+     "permission denied" — after the download, for the person least able to
+     guess why. */
+  {
+    const shouldRun = ['install.sh', 'uninstall.sh', path.join('bin', 'meow-translator'),
+      path.join('tools', 'test-server.mjs'), path.join('tools', 'test-archive.mjs')];
+    const notExecutable = shouldRun.filter(f => {
+      try { return (fs.statSync(path.join(APP, f)).mode & 0o111) === 0; } catch (e) { return false; }
+    });
+    check('the scripts that have to run are executable', notExecutable.length === 0,
+      notExecutable.join(', ') + ' — run: chmod +x ' + notExecutable.join(' '));
+  }
+
   check('uninstall.sh parses (bash -n)', unCheck.status === 0, unCheck.stderr.trim());
   const cli = fs.readFileSync(path.join(APP, 'bin', 'meow-translator'), 'utf8');
   const cliSyntax = spawnSync(process.execPath, ['--check', path.join(APP, 'bin', 'meow-translator')], { encoding: 'utf8' });
