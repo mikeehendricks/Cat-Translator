@@ -9,7 +9,12 @@
  *
  *   /            the single-file translator app (cat-translator.html)
  *   /audio/*.wav  sample meows rendered by the synthesiser
- *   /admin       the admin panel (one-time registration, then login)
+ *   /admin       the admin panel (one-time registration, then login). The panel
+ *                shares design/ui.css and design/symbols.html with the app, so
+ *                it is composed with those files inlined when it is first asked
+ *                for: a panel that needs a second request to look right would
+ *                flash unstyled, and one that needs the network could not work
+ *                on a machine with no way out.
  *   /api/*       the public version endpoint and the admin API
  *
  * Visit statistics record page views of the app only — admin traffic and static
@@ -60,6 +65,29 @@ function clientIp(req) {
     if (real) return { ip: normaliseIp(real), proxied: true };
   }
   return { ip: normaliseIp(req.socket.remoteAddress || ''), proxied: false };
+}
+
+/* ---------------------------------------------------------------------------
+   The admin page is written with two placeholders and composed on demand. The
+   files are small and read once, so this costs nothing per request, and a
+   missing file is reported loudly instead of shipping a broken panel.
+   ------------------------------------------------------------------------ */
+const DESIGN_DIR = path.join(__dirname, '..', 'design');
+const composed = new Map();
+
+function inlineDesign(name) {
+  if (composed.has(name)) return composed.get(name);
+  const shell = fs.readFileSync(name, 'utf8');
+  const read = (file, label) => {
+    const full = path.join(DESIGN_DIR, file);
+    if (!fs.existsSync(full)) throw new Error(`${label} is missing: ${full}`);
+    return fs.readFileSync(full, 'utf8');
+  };
+  const html = shell
+    .replace('/*__MEOW_DESIGN__*/', () => read('ui.css', 'the design system'))
+    .replace('<!--__MEOW_SYMBOLS__-->', () => read('symbols.html', 'the symbol sprite'));
+  composed.set(name, html);
+  return html;
 }
 
 function send(res, status, body, headers) {
@@ -257,7 +285,14 @@ async function handler(req, res) {
 
     /* ----------------------------------------------------------------- admin */
     if (req.method === 'GET' && (pathname === '/admin' || pathname === '/admin/')) {
-      return serveFile(res, path.join(__dirname, 'admin.html'), TYPES['.html'], {
+      let panel;
+      try {
+        panel = inlineDesign(path.join(__dirname, 'admin.html'));
+      } catch (err) {
+        log('error', 'admin panel could not be composed: ' + err.message);
+        return send(res, 500, 'admin panel unavailable: ' + err.message + '\n');
+      }
+      return send(res, 200, panel, Object.assign({ 'content-type': TYPES['.html'] }, {
         'content-security-policy': [
           "default-src 'self'",
           "script-src 'self' 'unsafe-inline'",
@@ -268,7 +303,7 @@ async function handler(req, res) {
           "base-uri 'none'",
           cfg.strictFrames ? "frame-ancestors 'none'" : "frame-ancestors *",
         ].join('; '),
-      });
+      }, { 'cache-control': 'no-store' }));
     }
     if (req.method === 'GET' && pathname.startsWith('/admin/')) {
       return send(res, 302, null, { location: '/admin' });

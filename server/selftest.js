@@ -73,11 +73,20 @@ if (check(fs.existsSync(appFile), 'cat-translator.html is missing')) {
 const adminFile = path.join(serverDir, 'admin.html');
 if (fs.existsSync(adminFile)) {
   const html = fs.readFileSync(adminFile, 'utf8');
-  for (const marker of ['id="adminApp"', 'id="loginView"', 'id="panelView"']) {
+  for (const marker of ['id="adminApp"', 'id="loginView"', 'id="panelView"',
+    '/*__MEOW_DESIGN__*/', '<!--__MEOW_SYMBOLS__-->']) {
     check(html.includes(marker), `admin.html is missing ${marker}`);
   }
+  /* The panel is composed with the shared design files at first request; make
+     sure those files exist and are actually inlined, or /admin would render as
+     unstyled markup on a live box. */
+  const designDir = path.join(ROOT, 'design');
+  for (const file of ['ui.css', 'symbols.html']) {
+    check(fs.existsSync(path.join(designDir, file)), `design/${file} is missing — /admin would not be styled`);
+  }
   check(!/src\s*=\s*["']https?:/i.test(html), 'admin.html pulls an external script');
-  notes.push(`admin panel ${(Buffer.byteLength(html) / 1024).toFixed(0)} kB`);
+  check(!/(href|src)\s*=\s*["'](?!data:|#|\/)/i.test(html), 'admin.html references a file it would have to fetch');
+  notes.push(`admin panel ${(Buffer.byteLength(html) / 1024).toFixed(0)} kB (design inlined at serve time)`);
 }
 
 /* 5. core modules load, and a store works in a throwaway directory ---------- */

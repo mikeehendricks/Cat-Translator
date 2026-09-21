@@ -42,6 +42,15 @@ const script = ORDER.map(f => {
   const body = fs.readFileSync(path.join(root, f), 'utf8');
   return `/* ==== ${path.basename(f)} ==== */\n${body}`;
 }).join('\n');
+/* The design system and the symbol sprite are shared with the admin panel, so
+   they live in design/ and are inlined here: the shipped file must render with
+   no network at all. */
+const design = fs.readFileSync(path.join(root, 'design/ui.css'), 'utf8');
+if (!html.includes('/*__MEOW_DESIGN__*/')) { console.error('\nshell.html lost its /*__MEOW_DESIGN__*/ placeholder\n'); process.exit(1); }
+html = html.replace('/*__MEOW_DESIGN__*/', () => design);
+const symbols = fs.readFileSync(path.join(root, 'design/symbols.html'), 'utf8');
+if (!html.includes('<!--__MEOW_SYMBOLS__-->')) { console.error('\nshell.html lost its symbol placeholder\n'); process.exit(1); }
+html = html.replace('<!--__MEOW_SYMBOLS__-->', () => symbols);
 html = html.replace('/*__MEOW_SCRIPTS__*/', () => script);
 html = html.replace(/\{\{STAT:([A-Z0-9]+)\}\}/g, (m, key) => (STATS[key] != null ? STATS[key] : '—'));
 const VERSION = (() => { try { return fs.readFileSync(path.join(root, 'VERSION'), 'utf8').trim(); } catch (e) { return '0.0.0'; } })();
@@ -51,6 +60,6 @@ const out = path.join(root, 'cat-translator.html');
 fs.writeFileSync(out, html);
 const kb = (fs.statSync(out).size / 1024).toFixed(0);
 console.log(`  version ${VERSION}`);
-console.log(`wrote cat-translator.html  (${kb} kB, ${ORDER.length} modules inlined, no external assets)`);
+console.log(`wrote cat-translator.html  (${kb} kB, ${ORDER.length} modules + design system inlined, no external assets)`);
 console.log(`  codebook: ${STATS.CODES} meows, ${STATS.LEXICON} english words`);
 if (metrics) console.log(`  quoted accuracy: per-meow top-1 ${STATS.TOP1}, top-3 ${STATS.TOP3}, word ${STATS.WORD}, utterance ${STATS.SENT}`);

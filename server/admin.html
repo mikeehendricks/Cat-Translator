@@ -6,94 +6,164 @@
 <meta name="robots" content="noindex, nofollow">
 <title>Meow translator · admin</title>
 <style>
-  :root{
-    --bg:#0f0d16; --bg2:#15121f; --panel:#1a1626; --line:#2b2539; --ink:#e9e6f3;
-    --muted:#9d95b5; --amber:#f0a04b; --amber2:#ffc46b; --violet:#9d7bff; --green:#5fd39a;
-    --red:#ff6b81; --blue:#6cb6ff;
-  }
-  *{box-sizing:border-box}
-  body{margin:0;background:radial-gradient(1100px 600px at 12% -10%, #241d3d 0%, transparent 60%),
-       radial-gradient(900px 500px at 100% 0%, #1b2a3d 0%, transparent 55%), var(--bg);
-       color:var(--ink);font:15px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;min-height:100vh}
-  a{color:var(--amber)}
-  .wrap{max-width:1180px;margin:0 auto;padding:22px 18px 60px}
-  header.top{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:18px}
-  header.top h1{font-size:20px;margin:0;letter-spacing:.2px}
-  header.top h1 span{color:var(--amber)}
-  .spacer{flex:1}
-  .badge{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:3px 9px;border-radius:999px;
-    border:1px solid var(--line);background:#1d1830;color:var(--muted);white-space:nowrap}
-  .badge.ok{border-color:#2f6b4d;background:#16301f;color:var(--green)}
-  .badge.warn{border-color:#6b5320;background:#312714;color:var(--amber2)}
-  .badge.bad{border-color:#6b2f3b;background:#31161d;color:var(--red)}
-  .badge.violet{border-color:#4a3a7a;background:#221a3a;color:#c9b6ff}
-  .card{background:linear-gradient(180deg,#1b1728,#171325);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px}
-  .card h2{margin:0 0 12px;font-size:15px;letter-spacing:.3px;text-transform:uppercase;color:var(--muted);font-weight:600}
-  .card h3{margin:16px 0 8px;font-size:14px}
-  .grid{display:grid;gap:14px}
-  .g2{grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
-  .g4{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
-  .stat{background:#1a1626;border:1px solid var(--line);border-radius:12px;padding:12px 14px}
-  .stat b{display:block;font-size:24px;line-height:1.2;color:var(--amber2)}
-  .stat span{font-size:12px;color:var(--muted)}
-  table{width:100%;border-collapse:collapse;font-size:13px}
-  th,td{text-align:left;padding:7px 9px;border-bottom:1px solid #241f33;vertical-align:top}
-  th{color:var(--muted);font-weight:600;font-size:11.5px;text-transform:uppercase;letter-spacing:.4px;position:sticky;top:0;background:#191527;z-index:1}
-  tr:hover td{background:#1d1930}
-  td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
-  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px}
-  .muted{color:var(--muted)}
-  .small{font-size:12.5px}
-  .tiny{font-size:11.5px}
-  button{font:inherit;border-radius:9px;border:1px solid var(--line);background:#241d38;color:var(--ink);
-    padding:8px 13px;cursor:pointer;transition:.15s}
-  button:hover{background:#2c2444;border-color:#3b3355}
-  button.primary{background:linear-gradient(92deg,var(--amber),#ff9f4a);color:#20160a;border:none;font-weight:600}
-  button.primary:hover{filter:brightness(1.07)}
-  button.danger{border-color:#5c2b36;background:#2a161d;color:#ffb3bf}
-  button.danger:hover{background:#3a1c25}
-  button.ghost{background:transparent}
-  button:disabled{opacity:.5;cursor:not-allowed}
-  button.small{padding:5px 10px;font-size:12.5px;border-radius:7px}
-  input,select,textarea{font:inherit;width:100%;background:#100e19;border:1px solid var(--line);color:var(--ink);
-    border-radius:9px;padding:9px 11px}
-  input:focus,select:focus,textarea:focus{outline:2px solid #4a3a7a;outline-offset:0}
-  label{display:block;font-size:12.5px;color:var(--muted);margin:10px 0 4px}
-  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
-  .row>*{flex:1;min-width:140px}
-  .tabs{display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 16px}
-  .tabs button{border-radius:999px;padding:7px 14px;background:#1b1728}
-  .tabs button.active{background:linear-gradient(92deg,#3a2c5e,#4a3a7a);border-color:#6a55a8;color:#fff}
-  .ok{color:var(--green)} .warn{color:var(--amber2)} .bad{color:var(--red)}
-  pre.log{background:#0d0b14;border:1px solid var(--line);border-radius:10px;padding:10px;max-height:280px;overflow:auto;
-    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;white-space:pre-wrap;margin:0}
-  .split{display:grid;grid-template-columns:1.15fr .85fr;gap:14px}
-  @media(max-width:900px){.split{grid-template-columns:1fr}}
-  .bar{height:8px;border-radius:999px;background:#241f33;overflow:hidden}
-  .bar i{display:block;height:100%;background:linear-gradient(90deg,var(--amber),var(--violet))}
-  .hide{display:none!important}
-  .center{min-height:70vh;display:flex;align-items:center;justify-content:center}
-  .auth{width:100%;max-width:420px}
-  .auth h1{font-size:22px;margin:0 0 4px}
-  .auth p{margin:6px 0 0}
-  .pill{font-size:11.5px;padding:2px 7px;border-radius:999px;background:#241f33;color:var(--muted);border:1px solid var(--line)}
-  .tinies{font-size:11.5px;color:var(--muted)}
-  .toast{position:fixed;right:16px;bottom:16px;z-index:50;display:flex;flex-direction:column;gap:8px;align-items:flex-end}
-  .toast div{background:#211a34;border:1px solid var(--line);border-left:3px solid var(--amber);border-radius:10px;
-    padding:10px 13px;font-size:13px;max-width:420px;box-shadow:0 12px 30px #0008}
-  .toast div.err{border-left-color:var(--red)}
-  .toast div.good{border-left-color:var(--green)}
-  .catline{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-  details summary{cursor:pointer;color:var(--muted);font-size:12.5px}
+/*__MEOW_DESIGN__*/
+
+/* ---------------------------------------------------------------------------
+   Admin layer. The panel's own vocabulary (cards, badges, tabs, stat figures)
+   is expressed in terms of the shared design system so both pages look like the
+   same product and inherit its light/dark and accessibility behaviour.
+   ------------------------------------------------------------------------ */
+
+body { background: var(--grouped); color: var(--label); min-height: 100vh; }
+.wrap { max-width: 78rem; margin: 0 auto; padding: var(--space-4) var(--margin) var(--space-8); }
+a { color: var(--tint); }
+.spacer { flex: 1; }
+.hide { display: none !important; }
+.mono { font-family: var(--font-mono); font-size: .9em; }
+.tiny, .tinies { font-size: var(--t-caption2); color: var(--label-2); }
+
+/* Header: a chrome bar, with the version and who-you-are as badges. */
+header.top {
+  position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: var(--space-3);
+  flex-wrap: wrap; margin: calc(-1 * var(--space-4)) calc(-1 * var(--margin)) var(--space-4);
+  padding: var(--space-3) var(--margin);
+  background: var(--chrome); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
+  border-bottom: .5px solid var(--separator);
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  header.top { background: var(--grouped); }
+}
+header.top h1 { margin: 0; font-size: var(--t-title3); letter-spacing: -.01em; }
+header.top h1 span { color: var(--tint); }
+
+/* Sign-in: one centred card, nothing else competing for attention. */
+.center { min-height: 80vh; display: flex; align-items: center; justify-content: center; padding: var(--margin); }
+.auth { width: 100%; max-width: 27rem; padding: var(--space-5); }
+.auth h1 { margin: 0; font-size: var(--t-title2); letter-spacing: -.015em; }
+.auth h1 span { color: var(--tint); }
+.catline { display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap; }
+
+/* Tabs read as one segmented control, as the platform does for a small,
+   mutually exclusive set of panes. */
+.tabs {
+  display: flex; gap: .25rem; flex-wrap: wrap; margin: 0 0 var(--space-4);
+  padding: .25rem; background: var(--fill-3); border-radius: var(--r-md);
+}
+.tabs button {
+  flex: 1 1 auto; min-height: 2.25rem; border: none; background: transparent; color: var(--label);
+  border-radius: calc(var(--r-md) - .125rem); padding: .4rem .75rem;
+  font-size: var(--t-subhead); font-weight: 590; cursor: pointer;
+}
+.tabs button:hover { background: var(--fill-4); }
+.tabs button.active { background: var(--grouped); color: var(--label); box-shadow: var(--shadow-1); }
+.tabs button:focus-visible { outline: .1875rem solid var(--tint); outline-offset: .125rem; }
+@media (max-width: 40rem) { .tabs { display: grid; grid-template-columns: repeat(2, 1fr); } }
+@media (prefers-color-scheme: dark) { .tabs button.active { background: var(--fill-4); } }
+
+/* Cards group related facts, as on the app page. */
+.card {
+  background: var(--grouped-2); border: .5px solid var(--separator); border-radius: var(--r-xl);
+  padding: var(--space-4); margin-bottom: var(--space-3);
+}
+.card h2 {
+  margin: 0 0 var(--space-3); font-size: var(--t-footnote); font-weight: 620; letter-spacing: .04em;
+  text-transform: uppercase; color: var(--label-2);
+}
+.card h3 { margin: var(--space-4) 0 var(--space-2); font-size: var(--t-headline); }
+.grid { display: grid; gap: var(--space-3); }
+.g2 { grid-template-columns: 1fr; }
+.g4 { grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr)); }
+@media (min-width: 56rem) { .g2 { grid-template-columns: repeat(2, 1fr); } }
+.split { display: grid; gap: var(--space-3); grid-template-columns: 1fr; }
+@media (min-width: 56rem) { .split { grid-template-columns: 1.15fr .85fr; } }
+
+/* Stat figures: one per fact, number first. */
+.stat { background: var(--grouped-2); border: .5px solid var(--separator); border-radius: var(--r-md); padding: var(--space-3); }
+.stat b { display: block; font-size: var(--t-title2); font-weight: 650; letter-spacing: -.02em; color: var(--label); }
+.stat span { display: block; margin-top: .15rem; font-size: var(--t-caption1); color: var(--label-2); }
+
+/* Tables: quiet rules, sticky header, figures aligned. */
+table { width: 100%; border-collapse: collapse; font-size: var(--t-subhead); }
+th, td { text-align: left; padding: .5rem .6rem; border-bottom: .5px solid var(--separator); vertical-align: top; }
+th {
+  position: sticky; top: 0; z-index: 1; background: var(--grouped-2); color: var(--label-2);
+  font-size: var(--t-caption2); font-weight: 620; letter-spacing: .04em; text-transform: uppercase;
+}
+tbody tr:hover td { background: var(--fill-3); }
+td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+td .mono { word-break: break-all; }
+
+/* Controls: the panel's own class names, mapped onto the shared buttons. */
+button { font: inherit; }
+button:not(.btn):not(.segmented__item) {
+  min-height: var(--hit); border-radius: var(--r-lg); border: none;
+  background: var(--fill-3); color: var(--label); padding: .5rem .9rem; cursor: pointer;
+  transition: background .15s ease, opacity .15s ease;
+}
+button:not(.btn):not(.segmented__item):hover { background: var(--fill-4); }
+button:not(.btn):not(.segmented__item):focus-visible { outline: .1875rem solid var(--tint); outline-offset: .125rem; }
+button.primary { background: var(--tint); color: var(--on-tint); font-weight: 600; }
+button.primary:hover { background: var(--tint-press); }
+button.ghost { background: transparent; color: var(--tint); }
+button.ghost:hover { background: var(--fill-3); }
+button.danger { background: var(--red-fill); color: var(--red); }
+button.danger:hover { background: var(--red-fill-strong); }
+button.small, button.smallish { min-height: 0; padding: .3rem .7rem; font-size: var(--t-caption1); border-radius: .5rem; }
+button:disabled { opacity: .45; cursor: not-allowed; }
+
+input, select, textarea {
+  font: inherit; width: 100%; background: var(--grouped-2); color: var(--label);
+  border: .5px solid var(--separator); border-radius: var(--r-md); padding: .6rem .7rem;
+  font-size: var(--t-body); min-height: var(--hit);
+}
+input:focus-visible, select:focus-visible, textarea:focus-visible { outline: .1875rem solid var(--tint); outline-offset: .0625rem; }
+input[type=checkbox] { width: auto; min-height: 0; }
+label { display: block; font-size: var(--t-footnote); color: var(--label-2); margin: var(--space-3) 0 .35rem; }
+.row { display: flex; gap: var(--space-3); flex-wrap: wrap; align-items: flex-end; }
+.row > * { flex: 1; min-width: 9rem; }
+
+/* Badges and figures: colour is never the only signal — each one carries a word. */
+.badge { display: inline-flex; align-items: center; gap: .35rem; font-size: var(--t-caption1); padding: .15rem .5rem;
+  border-radius: 999px; background: var(--fill-3); color: var(--label-2); white-space: nowrap; min-height: 1.5rem; }
+.badge.ok { background: var(--green-fill); color: var(--green); }
+.badge.warn { background: var(--orange-fill); color: var(--orange); }
+.badge.bad { background: var(--red-fill); color: var(--red); }
+.badge.violet, .badge.info { background: var(--tint-fill); color: var(--tint); }
+.pill { font-size: var(--t-caption2); padding: .1rem .45rem; border-radius: 999px; background: var(--fill-3); color: var(--label-2); }
+.pill.top { background: var(--tint-fill); color: var(--tint); }
+.ok { color: var(--green); } .warn { color: var(--orange); } .bad { color: var(--red); }
+.muted { color: var(--label-2); } .small { font-size: var(--t-subhead); }
+
+pre.log {
+  background: var(--fill-3); border: .5px solid var(--separator); border-radius: var(--r-md);
+  padding: var(--space-3); max-height: 17.5rem; overflow: auto; margin: 0;
+  font-family: var(--font-mono); font-size: var(--t-caption1); white-space: pre-wrap;
+}
+.bar { height: .5rem; border-radius: 999px; background: var(--fill-3); overflow: hidden; }
+.bar i { display: block; height: 100%; background: var(--tint); }
+
+/* Toasts: brief confirmations, bottom trailing, dismissable by time. */
+.toast { position: fixed; right: var(--margin); bottom: var(--margin); z-index: 50; display: flex; flex-direction: column;
+  gap: var(--space-2); align-items: flex-end; pointer-events: none; }
+.toast div {
+  background: var(--grouped-2); border: .5px solid var(--separator); border-left: .25rem solid var(--tint);
+  border-radius: var(--r-md); padding: .6rem .8rem; font-size: var(--t-subhead); max-width: 26rem;
+  box-shadow: var(--shadow-2); pointer-events: auto;
+}
+.toast div.err { border-left-color: var(--red); }
+.toast div.good { border-left-color: var(--green); }
+
+details summary { cursor: pointer; color: var(--label-2); font-size: var(--t-caption1); }
 </style>
 </head>
 <body>
+<!--__MEOW_SYMBOLS__-->
 <div id="adminApp">
 
   <!-- ------------------------------------------------------------- sign in -->
   <div id="loginView" class="center">
     <div class="card auth">
-      <div class="catline"><h1>Meow<span style="color:var(--amber)">.</span>admin</h1><span id="loginVersion" class="badge"></span></div>
+      <div class="catline"><h1>Meow<span>.</span>admin</h1><span id="loginVersion" class="badge"></span></div>
       <p class="muted small" id="loginIntro">Loading…</p>
 
       <form id="registerForm" class="hide" autocomplete="off">
@@ -126,21 +196,21 @@
   <div id="panelView" class="wrap hide">
     <header class="top">
       <h1>Meow<span>.</span>admin</h1>
-      <span id="appVersion" class="badge">v—</span>
+      <span id="appVersion" class="badge">version —</span>
       <span id="updateBadge" class="badge warn hide"></span>
       <span id="whoBadge" class="badge"></span>
       <div class="spacer"></div>
-      <button id="viewSite" class="small ghost">open the app ↗</button>
-      <button id="logoutBtn" class="small">sign out</button>
+      <button id="viewSite" class="small ghost"><svg class="symbol" aria-hidden="true"><use href="#i-globe"/></svg>Open the app</button>
+      <button id="logoutBtn" class="small"><svg class="symbol" aria-hidden="true"><use href="#i-lock"/></svg>Sign out</button>
     </header>
 
-    <div class="tabs" id="tabs">
-      <button data-tab="overview" class="active">Overview</button>
-      <button data-tab="visits">Visits</button>
-      <button data-tab="updates">Updates</button>
-      <button data-tab="credentials">Credentials</button>
-      <button data-tab="settings">Settings</button>
-      <button data-tab="audit">Audit log</button>
+    <div class="tabs" id="tabs" role="tablist" aria-label="Admin sections">
+      <button data-tab="overview" class="active" role="tab" aria-selected="true">Overview</button>
+      <button data-tab="visits" role="tab" aria-selected="false">Visits</button>
+      <button data-tab="updates" role="tab" aria-selected="false">Updates</button>
+      <button data-tab="credentials" role="tab" aria-selected="false">Credentials</button>
+      <button data-tab="settings" role="tab" aria-selected="false">Settings</button>
+      <button data-tab="audit" role="tab" aria-selected="false">Audit log</button>
     </div>
 
     <section id="tab-overview"></section>

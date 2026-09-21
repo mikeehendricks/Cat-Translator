@@ -368,8 +368,8 @@ node tools/verify-bundle.mjs    # the same, through the shipped single file: 18/
 ## Tests
 
 ```bash
-node tools/test-server.mjs                       # 70 checks: install, auth, visits, updates, rollback
-node tools/test-ui.mjs                           # jsdom UI test of the app (needs: npm i --no-save jsdom)
+node tools/test-server.mjs                       # 76 checks: install, auth, visits, updates, rollback
+node tools/test-ui.mjs                           # 71 checks: the app's UI and the interface guidelines
 node tools/test-installed.mjs http://127.0.0.1:8899   # verify a running installation over HTTP
 node server/selftest.js                          # the smoke test the updater runs
 ```
@@ -385,6 +385,37 @@ CSRF and cross-origin refusals, visit logging with location, a real update *incl
 handshake*, a rollback, a deliberately broken download that must not touch the live tree, credential
 changes, login lockout, and privacy mode.
 
+## The interface
+
+Both pages are built on one design system, `design/ui.css`, following Apple's Human Interface
+Guidelines. It is plain CSS with no build step of its own:
+
+- **Text styles** named after the platform's — `.large-title`, `.title1`–`.title3`, `.headline`,
+  `.body`, `.callout`, `.subhead`, `.footnote`, `.caption`, `.caption2` (11pt, the platform minimum).
+  The stack asks for the system font (SF on Apple platforms) and falls back sensibly elsewhere.
+- **Semantic colour.** Nothing in either page names a literal colour: `--label`, `--label-2`,
+  `--separator`, `--fill-3`, `--tint` (systemBlue) and the rest each carry their own light, dark and
+  Increase Contrast values. Change `--tint` and the whole product follows.
+- **Materials.** The top bar is translucent chrome (`backdrop-filter: saturate() blur()`), with an
+  opaque fallback when blur is unsupported and when Reduce Transparency is on.
+- **Layout by size class.** One column on compact widths and two above 56rem, a 16pt standard margin,
+  `env(safe-area-inset-*)` respected, and 44pt minimum hit targets on everything tappable.
+- **Accessibility.** Reduce Motion, Reduce Transparency and Increase Contrast are all honoured;
+  focus rings are visible, every control has an accessible name, state changes are announced
+  (`aria-live`) and never signalled by colour alone.
+- **Icons** come from `design/symbols.html`, a 23-symbol inline sprite on a 24×24 grid with a 1.9
+  stroke. No emoji, no icon font, nothing fetched.
+
+The app inlines the design system and the sprite at build time (`tools/build-app.mjs`), so
+`cat-translator.html` stays a single file that renders with no network at all. The admin panel keeps
+two placeholders and is composed the same way when it is first served, so it also arrives in one
+request.
+
+`tools/test-ui.mjs` asserts the parts of this that can be checked mechanically — the text-style
+hierarchy, both appearances, contrast, reduced motion, hit sizes, focus, accessible names, described
+canvases, and that no symbol reference dangles. It is the reason a future redesign cannot quietly
+drop dark mode or the 44pt targets.
+
 ## Repository layout
 
 ```
@@ -399,6 +430,7 @@ server/
   lib/                   config, store, auth, geo, stats, updater, restart
 deploy/                  systemd unit template
 src/                     app sources (lexicon, tokens, engine, synth, match, app, shell)
+design/                  the shared design system (ui.css) and the icon sprite (symbols.html)
 tools/                   codebook generator, tuner, evaluator, tests, dev servers
 audio/                   example meows rendered by the synthesiser
 ```

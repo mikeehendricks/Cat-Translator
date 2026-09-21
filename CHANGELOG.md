@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.0.9
+
+- **The interface now follows Apple's Human Interface Guidelines.** Both the app and the admin panel
+  are rebuilt on one shared design system (`design/ui.css`): the platform's text styles from Large
+  Title down to Caption 2, semantic colours that carry their own light, dark and Increase Contrast
+  values, a translucent chrome bar with a `saturate()`+`blur()` material (and an opaque fallback
+  where blur is unsupported), a grouped-background layout with cards, and 44pt minimum hit targets
+  with a visible focus ring. Reduce Motion, Reduce Transparency and Increase Contrast are all
+  honoured; nothing is signalled by colour alone.
+- **The app page was reorganised for size classes, not for devices.** One column with a segmented
+  "English → Meow / Meow → English" control on compact widths; two panes side by side above 56rem,
+  where the control steps aside. A large title scrolls under the bar and a small title fades in. Each
+  pane has an empty state before first use, the long explanation moved into a proper sheet (a
+  `<dialog>`, with an inline fallback where `<dialog>` is missing), and the version and update notice
+  stay where they were.
+- **The admin panel uses the same system**, so the two pages finally look like one product: grouped
+  cards, a sticky chrome header, badges for version/update/who, and a segmented section control. It
+  is composed with the design system and the symbol sprite inlined at first request, so the panel
+  still renders in one request and still works on a machine with no way out to the network.
+- **Icons are drawn, not borrowed.** `design/symbols.html` is a 23-symbol inline sprite (24×24 grid,
+  1.9 stroke, `currentColor`); emoji are gone from the interface chrome, so nothing depends on a font
+  the machine may not have. Every button that changed state now says so in words as well as colour —
+  copying reports "Copied", recording changes shape and wording.
+- **Behaviour is unchanged and still enforced by the suites.** Every id the app exposes is preserved;
+  the UI test now also asserts the parts of the guidelines that can be checked mechanically (text
+  styles, semantic colours, dark mode, contrast, reduced motion/transparency, hit sizes, focus,
+  accessible names, described canvases, radio-group semantics, no external references). 71 checks in
+  `tools/test-ui.mjs`, 76 in `tools/test-server.mjs`, 18 in `tools/verify-bundle.mjs`.
+- Fixed while doing it: the record button's state class was applied backwards (the "recording" style
+  showed at rest), and an empty translation no longer renders a card that says "0 meows" — the empty
+  state stays until there is something to say.
+
 ## 1.0.8
 
 - **New command: `meow-translator net-check`** — "why can't another machine reach it?". It reports

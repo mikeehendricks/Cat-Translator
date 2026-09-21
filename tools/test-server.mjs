@@ -269,6 +269,15 @@ async function waitForHealth(timeoutMs) {
   /* ---- 3. one-time registration ----------------------------------------- */
   const admin = await get('/admin');
   check('GET /admin serves the panel', admin.status === 200 && /id="loginView"/.test(admin.body));
+  check('the panel arrives with the shared design system inlined',
+    /--t-large-title/.test(admin.body) && /prefers-reduced-motion/.test(admin.body) &&
+    /--tint:\s*#007aff/.test(admin.body));
+  check('the panel arrives with the symbol sprite inlined',
+    /<symbol id="i-/.test(admin.body) && /<use href="#i-/.test(admin.body));
+  check('the panel fetches nothing from outside',
+    !/(src|href)\s*=\s*["']https?:/i.test(admin.body) &&
+    !/fetch\(\s*["']https?:/i.test(admin.body) &&
+    !/__MEOW_(DESIGN|SYMBOLS)__/.test(admin.body));
 
   const badToken = await post('/api/admin/register', { username: 'mike', password: 'meow-meow-123', setupToken: 'nope' });
   check('registration with a wrong setup token is refused', badToken.status === 403, JSON.stringify(badToken.body));

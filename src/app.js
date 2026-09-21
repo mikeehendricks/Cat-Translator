@@ -12,6 +12,9 @@
   const doc = { get el() { return g.document; } };
   const $ = (sel, root) => (root || g.document).querySelector(sel);
   const $$ = (sel, root) => Array.from((root || g.document).querySelectorAll(sel));
+  /* Inline symbol from the sprite in the page. Icons carry meaning next to their
+     label, never instead of it, and never as the only signal of a state. */
+  const SYM = (id, cls) => `<svg class="symbol${cls ? ' ' + cls : ''}" aria-hidden="true"><use href="#${id}"/></svg>`;
 
   const state = {
     voice: { pitch: 1, speed: 1, gruff: 1 },
@@ -133,8 +136,14 @@
   /* ----------------------------------------------------------- pane: encode */
   function renderMeowCard(enc) {
     const card = $('#encodeResult');
-    card.classList.remove('hidden');
+    const empty = $('#encodeEmpty');
+    /* Nothing to say (an empty box, or every word out of vocabulary) leaves the
+       empty state in place: a card saying "0 meows" is noise, not feedback. */
+    const wanted = enc.tokens.length > 0 || enc.notes.some(n => n.oov);
+    card.classList.toggle('hidden', !wanted);
+    if (empty) empty.classList.toggle('hidden', wanted);
     card.innerHTML = '';
+    if (!wanted) return [];
     const glyphRow = doc.el.createElement('div');
     glyphRow.className = 'glyphs';
     const chips = enc.tokens.map((tk, i) => {
@@ -164,15 +173,18 @@
     const row = doc.el.createElement('div');
     row.className = 'row';
     const play = doc.el.createElement('button');
-    play.className = 'primary';
-    play.textContent = '▶ Say it to the cat';
+    play.className = 'btn btn--filled';
+    play.innerHTML = `${SYM('i-play')}<span>Say it to the cat</span>`;
     play.onclick = () => sayIt(enc.tokens, chips);
     const copy = doc.el.createElement('button');
-    copy.className = 'ghost';
-    copy.textContent = '⧉ Copy meow text';
+    copy.className = 'btn';
+    copy.innerHTML = `${SYM('i-copy')}<span>Copy meow text</span>`;
     copy.onclick = () => {
       const t = enc.meow;
-      if (navigator.clipboard) navigator.clipboard.writeText(t).then(() => { copy.textContent = '✓ Copied'; setTimeout(() => copy.textContent = '⧉ Copy meow text', 1200); });
+      if (navigator.clipboard) navigator.clipboard.writeText(t).then(() => {
+        copy.innerHTML = `${SYM('i-check')}<span>Copied</span>`;
+        setTimeout(() => { copy.innerHTML = `${SYM('i-copy')}<span>Copy meow text</span>`; }, 1400);
+      });
     };
     row.appendChild(play); row.appendChild(copy);
     card.appendChild(row);
@@ -204,6 +216,11 @@
    */
   function renderRecognition(rec) {
     const card = $('#listenResult');
+    const empty = $('#listenEmpty');
+    /* Something was recorded and read back: an attempt happened, so the reading
+       replaces the empty state even when the answer is "nothing heard" — that
+       is feedback, and it is the feedback the person needs most. */
+    if (empty) empty.classList.add('hidden');
     card.classList.remove('hidden');
     card.innerHTML = '';
 
@@ -228,7 +245,7 @@
     const conf = rec.per.reduce((s, r, i) => s + (r.confidence || 0), 0) / rec.per.length;
     head.innerHTML = `<span class="badge ok">${rec.per.length === 1 ? 'heard' : 'heard ' + rec.per.length + ' meows'}</span>` +
       `<b class="big">${decoded.text || '(nothing)'}</b>` +
-      (rec.chosen.some(c => c > 0) ? ' <span class="badge ok" style="background:#9d7bff22;border-color:#9d7bff55;color:#c9b6ff">corrected</span>' : '');
+      (rec.chosen.some(c => c > 0) ? ' <span class="badge info">' + SYM('i-check') + 'corrected</span>' : '');
     card.appendChild(head);
 
     const meta = doc.el.createElement('div');
@@ -267,8 +284,8 @@
 
     const hint = doc.el.createElement('div');
     hint.className = 'hintbar';
-    hint.innerHTML = rec.pitchHint ? `💡 ${rec.pitchHint}` :
-      (rec.per.length > 1 ? 'tap a reading to correct it (shift-click to hear it) — the sentence updates right away' : '');
+    hint.innerHTML = rec.pitchHint ? `${SYM('i-info')} ${rec.pitchHint}` :
+      (rec.per.length > 1 ? 'Tap a reading to correct it — the sentence updates at once. Shift-click hears it.' : '');
     card.appendChild(hint);
   }
 
@@ -333,7 +350,7 @@
         cancelAnimationFrame(state.recRaf);
         drawLevel(0);
         const blob = new Blob(chunks, { type: chunks[0] ? chunks[0].type : 'audio/webm' });
-        status.textContent = 'thinking…';
+        status.textContent = 'Reading the meow…';
         try {
           const arr = await blob.arrayBuffer();
           const decoded = await audio().decodeAudioData(arr.slice(0));
@@ -343,14 +360,16 @@
         } catch (err) {
           status.textContent = 'could not decode that recording (' + (err && err.name ? err.name : 'error') + ')';
         }
-        btn.textContent = '● Record a meow';
-        btn.classList.add('rec');
+        btn.innerHTML = `${SYM('i-mic')}<span>Record a meow</span>`;
+        btn.classList.remove('is-recording');
+        btn.setAttribute('aria-pressed', 'false');
         checkSelfTest();
       };
       rec.start();
       state.recording = true;
-      btn.textContent = '■ Stop';
-      btn.classList.remove('rec');
+      btn.innerHTML = `${SYM('i-stop')}<span>Stop recording</span>`;
+      btn.classList.add('is-recording');
+      btn.setAttribute('aria-pressed', 'true');
       status.textContent = 'listening… meow now';
       const buf = new Uint8Array(an.fftSize);
       const meter = () => {
@@ -454,9 +473,59 @@
     };
     syncVoice();
 
+    initChrome();
+
     drawLevel(0);
     doEncode();
     $('#bootNotice').classList.add('hidden');
+  }
+
+  /**
+   * The parts of the interface that only exist to present things: the direction
+   * control on compact widths, the title that appears once the large one has
+   * scrolled under the bar, and the sheet. Each one is progressive: if any of it
+   * is missing the app still works, which is what the tests rely on.
+   */
+  function initChrome() {
+    /* direction: a segmented control that swaps panes where there is only room
+       for one of them. On wide screens both panes are visible and this is hidden. */
+    const segs = $$('.segmented__item');
+    const panes = { A: $('#paneA'), B: $('#paneB') };
+    const showPane = (which) => {
+      for (const s of segs) s.setAttribute('aria-checked', String(s.dataset.pane === which));
+      for (const [k, el] of Object.entries(panes)) if (el) el.classList.toggle('is-current', k === which);
+    };
+    for (const s of segs) s.addEventListener('click', () => showPane(s.dataset.pane || 'A'));
+    if (segs.length && panes.A && panes.B) showPane('A');
+
+    /* the bar's title fades in as the large title scrolls away */
+    const nav = $('#nav'), hero = $('#hero');
+    if (nav && hero && 'IntersectionObserver' in g) {
+      const io = new g.IntersectionObserver((entries) => {
+        for (const e of entries) nav.classList.toggle('is-scrolled', !e.isIntersecting);
+      }, { rootMargin: '-12px 0px 0px 0px' });
+      io.observe(hero);
+    }
+
+    /* how it works, as a sheet */
+    const sheet = $('#howSheet');
+    const open = $('#howBtn'), close = $('#howClose');
+    const canModal = sheet && typeof sheet.showModal === 'function';
+    if (canModal) {
+      if (open) open.addEventListener('click', () => sheet.showModal());
+      if (close) close.addEventListener('click', () => sheet.close());
+      /* the backdrop is part of the sheet: a click outside closes it */
+      sheet.addEventListener('click', (e) => { if (e.target === sheet) sheet.close(); });
+    } else if (sheet) {
+      /* No <dialog> in this browser: keep the content reachable as ordinary
+         markup that the button opens and the close control puts away, rather
+         than losing the explanation altogether. */
+      const toggle = (on) => { if (on) sheet.setAttribute('open', ''); else sheet.removeAttribute('open'); };
+      if (open) open.addEventListener('click', () => toggle(true));
+      if (close) close.addEventListener('click', () => toggle(false));
+      sheet.addEventListener('click', (e) => { if (e.target === sheet) toggle(false); });
+      toggle(true);
+    }
   }
 
   function doEncode() {

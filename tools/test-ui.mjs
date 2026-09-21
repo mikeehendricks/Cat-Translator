@@ -68,6 +68,7 @@ const dom = new JSDOM(html, {
 const win = dom.window;
 await new Promise(r => win.addEventListener('load', r));
 
+const css = html.match(/<style>([\s\S]*?)<\/style>/)[1];
 const $ = (sel) => win.document.querySelector(sel);
 const $$ = (sel) => Array.from(win.document.querySelectorAll(sel));
 
@@ -77,6 +78,9 @@ check('boot notice cleared', $('#bootNotice').classList.contains('hidden'));
 check('examples rendered', $$('#examples button').length >= 5, String($$('#examples button').length));
 check('ready-meow presets rendered', $$('#presets button').length >= 8, String($$('#presets button').length));
 check('voice label populated', /pitch/i.test($('#voiceLabel').textContent), $('#voiceLabel').textContent);
+check('the write pane shows an empty state before anything is typed', !$('#encodeEmpty').classList.contains('hidden'));
+check('the read pane shows an empty state before anything is recorded', !$('#listenEmpty').classList.contains('hidden'));
+check('no results are shown yet', $('#encodeResult').classList.contains('hidden') && $('#listenResult').classList.contains('hidden'));
 
 console.log('\nEnglish → Meow:');
 $('#englishIn').value = 'i love you so much';
@@ -88,10 +92,11 @@ check('one chip per meow', chips.length === expectTokens, `${chips.length} chips
 check('raw meow string shown', /meowtext/.test($('#encodeResult').innerHTML) && $('#encodeResult .meowtext').textContent.length > 0,
   $('#encodeResult .meowtext') ? '' : 'missing');
 check('meow string matches the engine', $('#encodeResult .meowtext').textContent === win.MEOW_ENGINE.encode('i love you so much').meow);
-check('play button present', !!$('#encodeResult .primary'));
+check('the primary action is present and filled (button hierarchy)',
+  !!$('#encodeResult .btn--filled'));
 
 /* play it: chips should animate, then stop */
-$('#encodeResult .primary').click();
+$('#encodeResult .btn--filled').click();
 await new Promise(r => setTimeout(r, 60));
 check('playing state set', !!win.MEOW_APP.state.lastBuffer);
 check('waveform drawn', $('#wave').width > 0);
@@ -170,6 +175,131 @@ $('#voicePitch').value = '1.2';
 $('#voicePitch').dispatchEvent(new win.Event('input'));
 check('slider updates state', win.MEOW_APP.state.voice.pitch === 1.2, String(win.MEOW_APP.state.voice.pitch));
 check('label updates', /1\.20/.test($('#voiceLabel').textContent), $('#voiceLabel').textContent);
+
+
+
+/* ---------------------------------------------------------------------------
+   The chrome added in this revision: panes, the sheet, empty states, and the
+   confirmation on Copy. These are the parts that only exist on screen, so they
+   are checked through the DOM the way a person would use them.
+   ------------------------------------------------------------------------ */
+
+console.log('\nChrome and panes:');
+
+check('the page starts on the write-something pane', $('#paneA').classList.contains('is-current'));
+check('the reading pane starts hidden on compact widths', !$('#paneB').classList.contains('is-current'));
+$$('.segmented__item')[1].click();
+check('choosing the other direction moves the selection',
+  $$('.segmented__item')[1].getAttribute('aria-checked') === 'true' &&
+  $$('.segmented__item')[0].getAttribute('aria-checked') === 'false');
+check('and moves the visible pane', $('#paneB').classList.contains('is-current') && !$('#paneA').classList.contains('is-current'));
+$$('.segmented__item')[0].click();
+check('it can be moved back', $('#paneA').classList.contains('is-current'));
+
+$('#englishIn').value = 'i love you';
+$('#translateBtn').click();
+await new Promise(r => setTimeout(r, 30));
+check('the empty state steps aside once there is a result', $('#encodeEmpty').classList.contains('hidden'));
+check('the result region is revealed', !$('#encodeResult').classList.contains('hidden'));
+check('a class the markup never defines has no styling to fall back on',
+  ['is-current', 'is-scrolled', 'is-recording'].every(c => css.includes(c)));
+
+$('#howBtn').click();
+await new Promise(r => setTimeout(r, 10));
+check('the explanation opens from the bar', $('#howSheet').hasAttribute('open'));
+$('#howClose').click();
+await new Promise(r => setTimeout(r, 10));
+check('and closes again', !$('#howSheet').hasAttribute('open'));
+
+/* Copy confirms what happened, then returns to its resting label. */
+const copyBtn = $('#encodeResult .btn:not(.btn--filled)');
+copyBtn.click();
+await new Promise(r => setTimeout(r, 20));
+check('copy confirms with a word and a symbol, not colour alone',
+  /copied/i.test(copyBtn.textContent) && /#i-check/.test(copyBtn.innerHTML), copyBtn.textContent.trim());
+await new Promise(r => setTimeout(r, 1500));
+check('and the label returns to normal', /copy/i.test(copyBtn.textContent) && !/copied/i.test(copyBtn.textContent),
+  copyBtn.textContent.trim());
+
+/* ---------------------------------------------------------------------------
+   Human Interface Guidelines: the rules that can be checked mechanically.
+   Layout and colour need eyes on them, but these are the ones a rewrite breaks
+   silently, so they are asserted here.
+   ------------------------------------------------------------------------ */
+
+const cssHas = (re, what) => check(what, re.test(css));
+
+console.log('\nHuman Interface Guidelines:');
+
+cssHas(/--font-ui:\s*-apple-system[^;]*BlinkMacSystemFont/, 'type uses the system font stack (SF on Apple platforms)');
+check('the full text-style hierarchy is defined (Large Title down to Caption 2)',
+  ['large-title', 'title1', 'title2', 'title3', 'headline', 'body', 'callout', 'subhead', 'footnote', 'caption', 'caption2']
+    .every(n => css.includes('.' + n)));
+cssHas(/--label:\s*#000000[\s\S]*?--label:\s*#ffffff/, 'semantic colours are defined for light and dark separately');
+cssHas(/@media\s*\(prefers-color-scheme:\s*dark\)/, 'dark appearance is supported');
+cssHas(/@media\s*\(prefers-contrast:\s*more\)/, 'increased contrast is supported');
+cssHas(/@media\s*\(prefers-reduced-motion:\s*reduce\)/, 'Reduce Motion is respected');
+cssHas(/@media\s*\(prefers-reduced-transparency:\s*reduce\)/, 'Reduce Transparency is respected');
+cssHas(/backdrop-filter/, 'translucent chrome uses a material, with a fallback where blur is unsupported');
+cssHas(/--hit:\s*2\.75rem/, 'the minimum hit target is 44pt');
+cssHas(/\.btn\s*\{[\s\S]*?min-height:\s*var\(--hit\)/, 'buttons are at least 44pt tall');
+cssHas(/:focus-visible\s*\{[\s\S]*?outline:\s*\.1875rem/, 'keyboard focus is visible');
+cssHas(/\.sr-only/, 'screen-reader-only text is available');
+check('safe areas are respected', /viewport-fit=cover/.test(html) && /env\(safe-area-inset-top\)/.test(css));
+cssHas(/--t-caption2:\s*0\.6875rem/, 'no text style is smaller than the platform minimum');
+
+const controls = $$('button, input, textarea, select, a[href]');
+const namedByLabel = (el) => {
+  if (el.id) {
+    const lab = win.document.querySelector('label[for="' + el.id + '"]');
+    if (lab && lab.textContent.trim()) return true;
+  }
+  return !!(el.getAttribute('aria-label') || el.closest('label') || el.textContent || el.getAttribute('title') || '').trim();
+};
+const unnamed = controls.filter(el => !namedByLabel(el));
+check('every control has an accessible name', unnamed.length === 0,
+  unnamed.map(el => el.tagName + (el.id ? '#' + el.id : '')).join(', '));
+
+/* Chrome only: the meow glyphs that appear inside presets are the language's own
+   notation (a tone marker is closer to a letter than to an icon), so they stay.
+   What must not happen is an emoji standing in for a control's icon. */
+const emoji = /[\u{1F300}-\u{1FAFF}\u{25A0}\u{25B6}\u{23F0}\u{FE0F}\u{2713}\u{29C9}]/u;
+const chromeButtons = ['translateBtn', 'stopBtn', 'recordBtn', 'selfTest', 'voiceRandom', 'howBtn', 'howClose']
+  .map(id => win.document.getElementById(id)).filter(Boolean);
+check('no emoji standing in for interface icons',
+  chromeButtons.length >= 6 && chromeButtons.every(b => !emoji.test(b.textContent || '')),
+  chromeButtons.filter(b => emoji.test(b.textContent || '')).map(b => b.id).join(', '));
+/* Every icon the page draws — in the markup and in whatever the script has
+   rendered by now — must resolve. A dangling reference draws nothing, which is
+   exactly the kind of breakage a redesign hides. */
+const definedSymbols = new Set(Array.from(win.document.querySelectorAll('symbol[id]')).map(s => s.id));
+const usedSymbols = new Set(Array.from(win.document.querySelectorAll('use'))
+  .map(u => (u.getAttribute('href') || u.getAttribute('xlink:href') || '').replace(/^#/, ''))
+  .filter(Boolean));
+const dangling = Array.from(usedSymbols).filter(id => !definedSymbols.has(id));
+check('every symbol the page draws exists in the sprite', dangling.length === 0,
+  dangling.join(', ') + ' (of ' + usedSymbols.size + ' used)');
+check('the sprite is present in full', definedSymbols.size >= 20, String(definedSymbols.size) + ' symbols');
+
+check('every chrome control carries a symbol from the sprite',
+  chromeButtons.every(b => /<use href="#i-/.test(b.innerHTML)),
+  chromeButtons.filter(b => !/<use href="#i-/.test(b.innerHTML)).map(b => b.id).join(', '));
+
+const canvases = $$('canvas');
+check('every canvas is described for assistive technology',
+  canvases.length > 0 && canvases.every(c => c.getAttribute('aria-label') && c.getAttribute('role') === 'img'),
+  canvases.map(c => c.id + ':' + (c.getAttribute('aria-label') || 'no label')).join(', '));
+check('the recording status is announced politely',
+  $('#recStatus') && $('#recStatus').getAttribute('aria-live') === 'polite');
+
+check('the long explanation is presented as a sheet',
+  !!$('#howSheet') && $('#howSheet').tagName === 'DIALOG' && !!$('#howClose'));
+check('the direction control is a radio group with exactly one selection',
+  $$('.segmented__item[role="radio"]').length === 2 &&
+  $$('.segmented__item[aria-checked="true"]').length === 1);
+check('the version is on the app page', /version \d+\.\d+\.\d+/.test($('#appVersion').textContent));
+check('appearance hints are declared (color-scheme + theme-color)',
+  /name="color-scheme"/.test(html) && /name="theme-color"/.test(html));
 
 console.log(fails ? `\n  ${fails} FAILURE(S)\n` : '\n  ALL UI CHECKS PASSED\n');
 process.exit(fails ? 1 : 0);
