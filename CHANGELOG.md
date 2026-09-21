@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.8
+
+- **New command: `meow-translator net-check`** — "why can't another machine reach it?". It reports
+  whether our own service is bound to all interfaces or only loopback, names any other program
+  holding the same port number, flags addresses that are not LAN addresses at all (container
+  bridges, link-local `169.254.x.x`), tests the app from the machine itself on each address, and
+  checks `ufw`/`DROP` policies — then prints the command that fixes it. It judges its own sockets by
+  reading `/proc/<pid>/cmdline`, so a proxy or port-forward on the same port number cannot be
+  mistaken for the service.
+- Documented how to read a failed connection: connection refused means nothing is listening on that
+  address; a timeout means a firewall or a wrong address; a browser upgrade to HTTPS is its own case.
+
 ## 1.0.7
 
 - **Port 80 is the default.** `sudo ./install.sh` (or `curl … | sudo bash`) now installs on port 80,

@@ -447,6 +447,17 @@ async function waitForHealth(timeoutMs) {
     env: Object.assign({}, process.env, { MEOW_CONFIG: path.join(ETC, 'config.json'), MEOW_APP_DIR: APP, MEOW_DATA_DIR: DATA }),
   });
   check('CLI versions lists history', cliVersions.status === 0 && cliVersions.stdout.includes('v' + BASE_VERSION));
+
+  /* net-check is the "why can't I reach it from my laptop" command. The test
+     installation is deliberately on 127.0.0.1, so it must say so. */
+  const cliNet = spawnSync(process.execPath, [path.join(APP, 'bin', 'meow-translator'), 'net-check'], {
+    encoding: 'utf8',
+    env: Object.assign({}, process.env, { MEOW_APP_DIR: APP, MEOW_DATA_DIR: DATA, MEOW_CONFIG: path.join(ETC, 'config.json') }),
+  });
+  const netOut = cliNet.stdout || '';
+  check('CLI net-check names a loopback-only bind',
+    netOut.includes('reachable only from this machine') && netOut.includes('config --host 0.0.0.0'),
+    netOut.split('\n').filter(l => /listens on|!--|! /.test(l)).slice(0, 2).join(' ').trim().slice(0, 160));
   const cliToken = spawnSync(process.execPath, [path.join(APP, 'bin', 'meow-translator'), 'token'], {
     encoding: 'utf8',
     env: Object.assign({}, process.env, { MEOW_CONFIG: path.join(ETC, 'config.json'), MEOW_APP_DIR: APP, MEOW_DATA_DIR: DATA }),

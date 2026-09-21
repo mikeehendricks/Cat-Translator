@@ -4,6 +4,7 @@
  * Server-side control tool.
  *
  *   sudo meow-translator config [--port N] [--host ADDR]
+ *   sudo meow-translator net-check
  *   sudo meow-translator status
  *   sudo meow-translator token [--rotate]
  *   sudo meow-translator update [--check] [--sha <commit>]
@@ -278,6 +279,131 @@ const commands = {
     store.save();
     console.log(`\n  ${C.ok}password reset${C.off} for "${username}" — every session was signed out.`);
     console.log(`  If no account existed yet, registration is now closed and this credential works at /admin.\n`);
+  },
+
+  /**
+   * "Why can't I reach it from my laptop?"
+   *
+   * Almost every case is one of four things: the service is listening on the
+   * loopback address only, something else owns the port, a firewall is dropping
+   * the traffic, or the address tried is not a LAN address of this machine at
+   * all (a container bridge, or a link-local address). Each is checked here and
+   * named, with the one command that fixes it.
+   */
+  async 'net-check'() {
+    const port = Number(opt('--port', cfg.port));
+    const wantAll = cfg.host === '0.0.0.0' || cfg.host === '::' || cfg.host === '0:0:0:0:0:0:0:0';
+    const problems = [], notes = [];
+    const say = (ok, text) => console.log(`  ${ok ? C.ok + 'ok' : C.warn + '!!'}${C.off} ${text}`);
+
+    console.log(`\n  ${C.dim}listening${C.off} ${cfg.host}:${port}   ${C.dim}config${C.off} ${cfg.configPath}`);
+
+    /* ---- 1. what is actually bound ------------------------------------- */
+    /* Judge only *our* sockets. Other programs may hold the same port number on
+       a different address (a proxy, a container forward), and crediting their
+       address to this service would hide a loopback-only bind. */
+    const ssLines = sh('ss -ltnp 2>/dev/null').out.split('\n');
+    const listeners = [];
+    for (const line of ssLines) {
+      const m = line.match(/^LISTEN\s+\d+\s+\d+\s+(\S+):(\d+)\s/);
+      if (!m || Number(m[2]) !== port) continue;
+      const proc = (line.match(/users:\(\((.*?)\)\)/) || [])[1] || '';
+      const pid = (proc.match(/pid=(\d+)/) || [])[1] || null;
+      let cmd = '';
+      if (pid) { try { cmd = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' '); } catch (e) { /* not ours to read */ } }
+      const isOurs = cmd ? (cmd.includes('server/server.js') && (cmd.includes(cfg.appDir) || !cmd.trim())) : /node/.test(proc);
+      listeners.push({ addr: m[1], proc: proc || (pid ? `pid ${pid}` : 'unknown'), pid, isOurs, line: line.trim() });
+    }
+    const ourListeners = listeners.filter(l => l.isOurs);
+    const others = listeners.filter(l => !l.isOurs);
+    const ourAddrs = ourListeners.map(l => l.addr);
+
+    if (!listeners.length) {
+      say(false, `nothing is listening on port ${port}`);
+      problems.push(`nothing is listening on port ${port} — is the service running?  systemctl status ${opt('--service', 'meow-translator')}`);
+      notes.push(`a service that fails to start usually says why: journalctl -u ${opt('--service', 'meow-translator')} -n 40`);
+    } else if (!ourListeners.length) {
+      say(false, `port ${port} is held by another program: ${others[0].proc}`);
+      problems.push(`another program holds port ${port} (${others[0].proc}) — nginx/apache2 are the usual suspects: ss -ltnp | grep :${port}`);
+    } else {
+      for (const l of others) {
+        notes.push(`note: ${l.addr}:${port} is also held by ${l.proc} — a different program sharing the port number on another address`);
+      }
+      const loopbackOnly = ourAddrs.every(a => a === '127.0.0.1' || a === '::1' || a === '[::1]');
+      if (loopbackOnly) {
+        say(false, `our service listens on ${ourAddrs.join(', ')} — the loopback address, reachable only from this machine`);
+        problems.push(`the service listens on ${ourAddrs[0]} only, so nothing outside this machine can connect — run: meow-translator config --host 0.0.0.0 --port ${port}`);
+      } else {
+        say(true, `our service listens on ${ourAddrs.join(', ')}`);
+      }
+    }
+
+    /* ---- 2. which addresses does this machine actually have? ------------ */
+    const ipOut = sh(`ip -o -4 addr show 2>/dev/null`).out;
+    const addrs = [];
+    for (const line of ipOut.split('\n')) {
+      const m = line.match(/^\d+:\s+(\S+)\s+inet\s+(\d+\.\d+\.\d+\.\d+)\/(\d+)/);
+      if (!m) continue;
+      addrs.push({ iface: m[1], ip: m[2], prefix: Number(m[3]) });
+    }
+    const nonLoop = addrs.filter(a => !a.ip.startsWith('127.'));
+    for (const a of nonLoop) {
+      const kind = /^(docker|br-|veth|virbr|vmnet|tun|tap)/.test(a.iface) ? 'bridge/container'
+        : a.ip.startsWith('169.254.') ? 'link-local'
+          : a.ip.startsWith('172.1[6-9].') || a.ip.startsWith('172.2\d.') || a.ip.startsWith('172.3[01].') ? 'private'
+            : 'private';
+      notes.push(`${a.iface.padEnd(16)} ${a.ip.padEnd(16)} ${kind}`);
+      if (kind === 'bridge/container') {
+        problems.push(`${a.ip} is on ${a.iface}, a container/bridge network — it is not an address other machines on your LAN can reach`);
+      } else if (kind === 'link-local') {
+        problems.push(`${a.ip} on ${a.iface} is link-local (169.254.x.x) — only reachable by machines on the same physical segment`);
+      }
+    }
+    const lanCandidates = nonLoop.filter(a => !/^(docker|br-|veth|virbr)/.test(a.iface) && !a.ip.startsWith('169.254.'));
+    if (!nonLoop.length) problems.push('this machine has no address other than loopback — it is not on a network');
+    else if (!lanCandidates.length) notes.push('no plausible LAN address found — nothing here another machine could dial');
+
+    /* ---- 3. can the machine reach itself over that address? ------------- */
+    for (const a of nonLoop) {
+      const r = sh(`curl -fsS --max-time 3 "http://${a.ip}:${port}/healthz" 2>/dev/null`);
+      const ok = r.code === 0 && /"ok":true/.test(r.out);
+      const oursHere = ourAddrs.some(x => x === '0.0.0.0' || x === '::' || x === a.ip);
+      say(ok && oursHere, `http://${a.ip}:${port}/ ${!ok ? 'does not answer from this machine'
+        : oursHere ? 'answers' : 'is answered by another program, not this service'}`);
+      if (!ok && a.iface) {
+        problems.push(`http://${a.ip}:${port}/ does not answer even from this machine — if the firewall is off and something is listening, the address may not be routable`);
+      }
+    }
+
+    /* ---- 4. firewall ---------------------------------------------------- */
+    const ufw = sh('ufw status 2>/dev/null');
+    if (ufw.code === 0 && /^Status:\s+active/m.test(ufw.out)) {
+      const allowed = new RegExp(`^${port}(/tcp)?\\s+ALLOW`, 'm').test(ufw.out) ||
+        new RegExp(`^${port}/tcp\\s+ALLOW`, 'm').test(ufw.out);
+      if (allowed) say(true, `ufw is active and allows port ${port}`);
+      else {
+        say(false, `ufw is active and does not allow port ${port}`);
+        problems.push(`ufw is blocking port ${port} — run: sudo ufw allow ${port}/tcp`);
+      }
+    } else {
+      notes.push('ufw is not active here');
+      const ipt = sh(`iptables -S INPUT 2>/dev/null`);
+      if (/^-P INPUT DROP/m.test(ipt.out) && !new RegExp(`--dport ${port}`).test(ipt.out)) {
+        problems.push(`the INPUT policy is DROP and nothing allows port ${port} — add a rule, or use ufw`);
+      }
+    }
+
+    console.log('');
+    for (const n of notes) if (n) console.log(`  ${C.dim}·${C.off} ${n}`);
+    if (!problems.length) {
+      console.log(`\n  ${C.ok}reachable${C.off} — from another machine on this network, try:`);
+      for (const a of lanCandidates) console.log(`    http://${a.ip}:${port}/`);
+      console.log('');
+      return;
+    }
+    console.log('');
+    for (const p of problems) console.log(`  ${C.warn}!${C.off} ${p}`);
+    console.log(`\n  ${C.dim}from the other machine:  curl -v --max-time 5 http://<address>:${port}/   (connection refused = nothing listening; timed out = firewall)${C.off}\n`);
   },
 
   async 'install-service'() {

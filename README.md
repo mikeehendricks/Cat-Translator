@@ -237,12 +237,40 @@ Rebuild `cat-translator.html` (`node tools/build-app.mjs`) before bumping if you
 
 ---
 
+## Reaching it from another machine
+
+`http://<the server's LAN address>/` should just work — the installer binds every interface. When it
+does not, one command tells you which of the four usual reasons it is:
+
+```bash
+sudo meow-translator net-check
+```
+
+It reports, in plain language:
+
+- whether **our** service is bound to all interfaces or only to `127.0.0.1` (in which case nothing
+  outside the machine can connect), and names any *other* program that shares the port number on a
+  different address;
+- which addresses the machine actually has, flagging container/bridge interfaces (`docker0`, `br-*`,
+  `veth*`) and link-local `169.254.x.x` addresses — neither is reachable from your laptop;
+- whether the app answers on each of those addresses from the machine itself;
+- whether `ufw` (or a `DROP` input policy) is blocking the port.
+
+Read the last line of a failed connection attempt this way:
+
+| from the other machine | meaning |
+|---|---|
+| `Connection refused` | something answered, and nothing is listening on that address — check the bind address |
+| **times out / no route to host** | the packets never arrived — firewall, or the address is not really on your network |
+| the browser pages you to **https://** | HTTPS-First upgrade. Type the `http://` form, or use `curl` to confirm the server is fine |
+
 ## Troubleshooting
 
 | symptom | cause and fix |
 |---|---|
 | recordings don't work, "microphone unavailable" | browsers need a secure context. Serve over HTTPS (`sudo meow-translator setup-https your.domain.com`) or use localhost. |
 | every visitor is logged as `127.0.0.1` | the app is behind a proxy but `trustProxy` is false. Set it in `/etc/meow-translator/config.json` (or let `setup-https` do it) and restart. |
+| can't reach it from another machine on the LAN | `sudo meow-translator net-check` — it checks the bind address, which program owns the port, whether the address is a LAN address at all (not a container bridge or a link-local one), and whether ufw allows the port, then prints the fix. |
 | changing the port to 80 leaves the service dead | the unit needs `CAP_NET_BIND_SERVICE` (above). `sudo meow-translator install-service` rewrites it from the deployed template. |
 | visitor addresses look forged | the app is exposed directly but `trustProxy` is true, so a client can send its own `X-Forwarded-For`. Set `"trustProxy": false` when nothing sits in front of the app. |
 | location column stays "looking up…" | outbound HTTPS is blocked, or lookups are off. Check with `sudo meow-translator geo-probe` and the Settings tab. |
@@ -265,6 +293,7 @@ Logs: `journalctl -u meow-translator -f` · Data: `/var/lib/meow-translator` · 
 ```bash
 sudo meow-translator status                 # version, service state, URL, visit count
 sudo meow-translator config [--port N] [--host ADDR]   # what it listens on, and how to change it
+sudo meow-translator net-check              # why can't another machine reach it?
 sudo meow-translator token [--rotate]       # print or rotate the one-time setup token
 sudo meow-translator update [--check|--sha <commit>]
 sudo meow-translator versions               # installed history with snapshots
