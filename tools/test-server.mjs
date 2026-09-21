@@ -50,6 +50,27 @@ function check(name, cond, detail) {
 }
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+/* ---------------------------------------------------------------------------
+   A host where tar is unusable.
+
+   Some environments refuse tar's file creation outright — every entry comes
+   back "tar: <path>: Cannot open: Function not implemented", which is open(2)
+   returning ENOSYS — while Node writes to the same directory without complaint.
+   The service is started with this shim ahead of the real tar on PATH, so the
+   whole suite runs on such a host: every update and rollback below has to work
+   without tar, and the shim records any attempt to use it.
+   ------------------------------------------------------------------------ */
+const SHIM_DIR = path.join(os.tmpdir(), `meow-shim-${process.pid}`);
+const SHIM_MARKER = path.join(SHIM_DIR, 'tar-was-called');
+fs.rmSync(SHIM_DIR, { recursive: true, force: true });
+fs.mkdirSync(SHIM_DIR, { recursive: true });
+fs.writeFileSync(path.join(SHIM_DIR, 'tar'),
+  '#!/bin/sh\n' +
+  `echo "$@" >> ${JSON.stringify(SHIM_MARKER)}\n` +
+  'echo "tar: Cannot open: Function not implemented" >&2\n' +
+  'exit 2\n', { mode: 0o755 });
+const tarCalls = () => (fs.existsSync(SHIM_MARKER) ? fs.readFileSync(SHIM_MARKER, 'utf8').trim().split('\n').length : 0);
+
 /* --------------------------------------------------------------- stand-in GitHub */
 
 function buildTarball(version, sha) {
@@ -124,6 +145,8 @@ function startServer(extraEnv) {
       MEOW_GITHUB_API: `http://127.0.0.1:${GH_PORT}`,
       MEOW_GITHUB_RAW: `http://127.0.0.1:${GH_PORT}`,
       MEOW_GITHUB_TAR: `http://127.0.0.1:${GH_PORT}`,
+      /* the shim comes first: this service runs on a host where tar fails */
+      PATH: `${SHIM_DIR}:${process.env.PATH || ''}`,
     }, extraEnv || {}),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -379,6 +402,13 @@ async function waitForHealth(timeoutMs) {
   check('update reports the new version', updRes.body.version === REMOTE_VERSION, updRes.body.version);
   check('update snapshotted the previous version', updRes.body.backupTaken === true);
   check('the version file on disk was updated', fs.readFileSync(path.join(APP, 'VERSION'), 'utf8').trim() === REMOTE_VERSION);
+  check('the update did not need tar (the shim was never called)', tarCalls() === 0,
+    tarCalls() + ' call(s): ' + (fs.existsSync(SHIM_MARKER) ? fs.readFileSync(SHIM_MARKER, 'utf8').trim() : ''));
+  /* the updater logs into the store, which is what the panel shows */
+  const updateLog = JSON.parse(fs.readFileSync(path.join(DATA, 'store.json'), 'utf8')).updateLog || [];
+  check('the update log says the archive was unpacked with the built-in reader',
+    updateLog.some(l => /built-in reader/.test(l.message)),
+    updateLog.slice(-4).map(l => l.level + ': ' + l.message).join(' | ').slice(0, 220));
 
   const back = await waitForFreshHealth(beforeUpdate && beforeUpdate.instanceId, 45000);
   check('the service came back after the update (self-restart)', !!back,
@@ -402,6 +432,7 @@ async function waitForHealth(timeoutMs) {
   const rb = await post('/api/admin/updates/rollback', { version: BASE_VERSION });
   check('rollback reports success', rb.status === 200 && rb.body.version === BASE_VERSION, JSON.stringify(rb.body).slice(0, 200));
   const back2 = await waitForFreshHealth(beforeRollback && beforeRollback.instanceId, 45000);
+  check('tar was never needed anywhere in the suite', tarCalls() === 0, tarCalls() + ' call(s)');
   check('the rollback restarted the process', !!back2,
     `instance before ${beforeRollback && beforeRollback.instanceId}, after ${back2 && back2.instanceId}`);
   check(`the rolled-back service runs v${BASE_VERSION} again`, back2 && back2.version === BASE_VERSION, back2 && back2.version);

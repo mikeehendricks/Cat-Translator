@@ -186,37 +186,77 @@ ok "directories ready: $APP_DIR, $DATA_DIR, $CONF_DIR"
 say "fetching the application"
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
-if [ "$SOURCE_MODE" = local ]; then
-  say "installing from $SCRIPT_DIR"
-  # Copy the application, never the things that are not the application. A
-  # development checkout can hold a repository, installed dependencies, caches
-  # and — if the data directory was left at its default — runtime state,
-  # including the store's own copies of earlier installs. Copying that back into
-  # itself is an infinite regress that fills the disk, so the data directory is
-  # excluded explicitly, wherever it lives.
-  DATA_REL=""
+
+# Unpacking and copying are done by the application's own reader
+# (server/lib/archive.js) whenever we can get hold of it, and the system tar is
+# only a fallback. That order matters: some hosts refuse tar's file creation
+# outright — every entry reports "Cannot open: Function not implemented", which
+# is open(2) returning ENOSYS — and an installer that cannot be run on such a
+# host is no installer at all. The updater makes the same choice for the same
+# reason. The reader is a single file, so fetching it costs one small request
+# and needs no unpacking of its own.
+ARCHIVE_JS=""
+if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/server/lib/archive.js" ]; then
+  ARCHIVE_JS="$SCRIPT_DIR/server/lib/archive.js"
+elif command -v node >/dev/null 2>&1; then
+  RAW_BASE="${GITHUB_RAW:-https://raw.githubusercontent.com}"
+  if curl -fsSL --retry 2 --max-time 60 \
+       "$RAW_BASE/$REPO_DEFAULT/$BRANCH_DEFAULT/server/lib/archive.js" \
+       -o "$STAGE/archive.js" 2>/dev/null; then
+    ARCHIVE_JS="$STAGE/archive.js"
+  fi
+fi
+
+# The application, never the things around it: a development checkout can hold a
+# repository, installed dependencies, caches, and runtime state — including the
+# store's own snapshots of earlier installs, which is an infinite regress if it
+# is copied into itself. EXCLUDES is also what the live-tree wipe below protects.
+DATA_REL=""
+case "$DATA_DIR" in
+  */data|*/data/) DATA_REL="data" ;;
+esac
+if [ -n "$SCRIPT_DIR" ] && [ -n "$DATA_DIR" ]; then
   case "$DATA_DIR" in
     "$SCRIPT_DIR"/*) DATA_REL="./${DATA_DIR#"$SCRIPT_DIR"/}" ;;
   esac
-  tar -C "$SCRIPT_DIR" \
-    --exclude='./.git' --exclude='./node_modules' --exclude='./.npm' \
-    --exclude='./.cache' --exclude='./.local' --exclude='./.arena' \
-    --exclude='./data' --exclude='./versions' --exclude='./staging' \
-    --exclude='./local' --exclude='*.log' \
-    ${DATA_REL:+--exclude="$DATA_REL"} \
-    -cf - . | tar -C "$STAGE" -xf -
+fi
+EXCLUDES="./.git ./.npm ./.cache ./.local ./.arena ./node_modules ./data ./staging ./local ./versions"
+[ -n "$DATA_REL" ] && EXCLUDES="$EXCLUDES $DATA_REL"
+
+if [ "$SOURCE_MODE" = local ]; then
+  say "installing from $SCRIPT_DIR"
+  if [ -n "$ARCHIVE_JS" ]; then
+    node "$ARCHIVE_JS" copy "$SCRIPT_DIR" "$STAGE/tree" $EXCLUDES >/dev/null \
+      || die "could not stage the source tree"
+  else
+    mkdir -p "$STAGE/tree"
+    tar -C "$SCRIPT_DIR" --exclude='./.git' --exclude='./node_modules' --exclude='./.npm' \
+      --exclude='./data' --exclude='./.cache' --exclude='./.local' --exclude='./.arena' \
+      --exclude='./local' -cf - . | tar -C "$STAGE/tree" -xf - \
+      || die "could not stage the source tree (and server/lib/archive.js was not readable)"
+  fi
 else
   URL="${GITHUB_URL:-https://codeload.github.com/$REPO_DEFAULT/tar.gz/$BRANCH_DEFAULT}"
   say "downloading $URL"
   curl -fsSL --retry 3 --max-time 300 "$URL" -o "$STAGE/src.tgz" || die "download failed"
-  tar -xzf "$STAGE/src.tgz" -C "$STAGE"
+  if [ -n "$ARCHIVE_JS" ]; then
+    mkdir -p "$STAGE/unpacked"
+    node "$ARCHIVE_JS" extract "$STAGE/src.tgz" "$STAGE/unpacked" >/dev/null \
+      || die "could not unpack the archive with the built-in reader"
+    INNER="$(find "$STAGE/unpacked" -maxdepth 1 -mindepth 1 -type d | head -1)"
+    [ -n "$INNER" ] || die "the archive did not unpack as expected"
+    mv "$INNER" "$STAGE/tree"
+  else
+    warn "no server/lib/archive.js available — falling back to the system tar"
+    mkdir -p "$STAGE/unpacked"
+    tar -xzf "$STAGE/src.tgz" -C "$STAGE/unpacked" || die "tar could not unpack the archive"
+    INNER="$(find "$STAGE/unpacked" -maxdepth 1 -mindepth 1 -type d | head -1)"
+    [ -n "$INNER" ] || die "the archive did not unpack as expected"
+    mv "$INNER" "$STAGE/tree"
+  fi
   rm -f "$STAGE/src.tgz"
-  INNER="$(find "$STAGE" -maxdepth 1 -mindepth 1 -type d | head -1)"
-  [ -n "$INNER" ] || die "the archive did not unpack as expected"
-  mv "$INNER" "$STAGE/tree"
-  rm -rf "${STAGE:?}"/*.tgz 2>/dev/null || true
-  STAGE="$STAGE/tree"
 fi
+STAGE="$STAGE/tree"
 [ -f "$STAGE/server/server.js" ] || die "server/server.js is missing from the payload"
 STAGE_KB="$(du -sk "$STAGE" | cut -f1)"
 if [ "${STAGE_KB:-0}" -gt 262144 ]; then
@@ -228,7 +268,15 @@ say "payload: ${STAGE_KB} kB"
 
 # copy over the live tree, keeping anything the update system protects
 say "installing into $APP_DIR"
-if command -v rsync >/dev/null 2>&1; then
+if [ -n "$ARCHIVE_JS" ]; then
+  # Clear the way the way `rsync --delete` would, keeping what the update system
+  # owns, and then copy with the reader.
+  find "$APP_DIR" -mindepth 1 -maxdepth 1 \
+    ! -name data ! -name node_modules ! -name .git ! -name .env ! -name local \
+    -exec rm -rf {} +
+  node "$ARCHIVE_JS" copy "$STAGE" "$APP_DIR" $EXCLUDES >/dev/null \
+    || die "could not copy the application into $APP_DIR"
+elif command -v rsync >/dev/null 2>&1; then
   rsync -a --delete \
     --exclude '.git' --exclude 'node_modules' --exclude 'data' --exclude '.env' --exclude 'local' \
     "$STAGE/" "$APP_DIR/"

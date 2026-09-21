@@ -26,6 +26,7 @@ const path = require('node:path');
 const os = require('node:os');
 const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
+const archiveUtil = require('./archive');
 const { Readable } = require('node:stream');
 const { matchOwner, matchOwnerTree, chownTree, ownerOf, isRoot } = require('./fsowner');
 
@@ -342,11 +343,41 @@ class Updater {
     throw new Error(`could not download the archive: ${lastErr ? lastErr.message : 'unknown error'}`);
   }
 
+  /**
+   * Unpack the release archive.
+   *
+   * Our own reader does the work, because on some hosts the system tar cannot
+   * create files at all — open(2) comes back ENOSYS and every entry reports
+   * "Cannot open: Function not implemented" — even though Node writes to the
+   * same directory without complaint (the archive itself was just saved there).
+   * tar stays as a second attempt, for the opposite case where an archive uses
+   * something our reader does not know about.
+   */
   extract(archive, dir, sha) {
     fs.mkdirSync(dir, { recursive: true });
-    const r = spawnSync('tar', ['-xzf', archive, '-C', dir], { encoding: 'utf8' });
-    if (r.error && r.error.code === 'ENOENT') throw new Error('the "tar" command is missing on this server');
-    if (r.status !== 0) throw new Error(`tar failed: ${(r.stderr || '').slice(0, 200)}`);
+    let skipped = [];
+    try {
+      const result = archiveUtil.extractFile(archive, dir);
+      skipped = result.skipped || [];
+      this.log('info', `unpacked with the built-in reader: ${result.files} file(s), ` +
+        `${(result.bytes / 1024).toFixed(0)} kB${skipped.length ? `, ${skipped.length} entry(s) skipped` : ''}`);
+    } catch (nodeErr) {
+      this.log('warn', `the built-in reader could not unpack the archive (${nodeErr.message}); trying tar`);
+      const r = spawnSync('tar', ['-xzf', archive, '-C', dir], { encoding: 'utf8' });
+      if (r.error && r.error.code === 'ENOENT') {
+        throw new Error(`could not unpack the archive: ${nodeErr.message}; and the "tar" command ` +
+          `is not installed on this server either (${archiveUtil.describeFilesystem(dir)})`);
+      }
+      if (r.status !== 0) {
+        throw new Error(`could not unpack the archive: ${nodeErr.message}; tar also failed: ` +
+          `${(r.stderr || '').trim().slice(0, 300)} — the staging directory is on ` +
+          `${archiveUtil.describeFilesystem(dir)}`);
+      }
+    }
+    if (skipped.length) {
+      this.warnings = this.warnings || [];
+      for (const item of skipped) this.warnings.push(`archive entry skipped: ${item.path} (${item.reason})`);
+    }
     const entries = fs.readdirSync(dir).filter(n => !n.startsWith('.'));
     if (entries.length !== 1) throw new Error('unexpected archive layout');
     const top = path.join(dir, entries[0]);

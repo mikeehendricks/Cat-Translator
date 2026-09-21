@@ -17,3 +17,6 @@ tools/.cache/
 
 # local preview state
 .preview-*/
+
+# files the user attached to the conversation
+uploads/

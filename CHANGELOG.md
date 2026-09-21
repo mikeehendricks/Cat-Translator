@@ -1,5 +1,34 @@
 # Changelog
 
+## 1.0.10
+
+- **The updater no longer needs `tar`.** On some hosts the system tar cannot create files at all:
+  every entry comes back `tar: <path>: Cannot open: Function not implemented`, which is `open(2)`
+  returning `ENOSYS` — what a seccomp profile, a user namespace or an unusual filesystem does to a
+  syscall it does not implement. The archive had already been downloaded and written to disk by Node
+  in that same directory, so it was tar's child process being refused, not the filesystem. Installing
+  an update on such a machine failed with a message that named tar and nothing else.
+  `server/lib/archive.js` now does the unpacking with the standard library — gzip via `zlib`, tar
+  parsed directly — and `tar` is kept only as a second attempt for archives that use something the
+  reader does not know about. If both fail, the error names the filesystem the staging directory is
+  on, so the next report of this kind is diagnosable in one line. The update log says which method
+  was used.
+- **`install.sh` works on those hosts too.** Staging the payload and copying it into place used
+  `tar` as well, which made a broken tar a broken installer. Both now use the same reader when it can
+  be had (it is a single file: taken from the source tree, or fetched from the same branch in
+  remote installs) and only fall back to `tar` when it cannot be. This also means the fix can be
+  delivered to a machine whose updater is already broken, which is the case that matters.
+- **Unpacking is now a security boundary too.** Entries are checked individually: an absolute path,
+  a `..` segment or a symlink pointing outside the archive is refused rather than half-applied, and
+  symlinks and hard links that stay inside the tree are recreated while links that leave it are
+  reported and skipped. Writing it ourselves is what made that checkable.
+- New suite `tools/test-archive.mjs` (32 checks) compares the reader against GNU tar byte for byte —
+  both the GNU and POSIX formats, long paths needing a long-name record, a 3 MB file, symlinks,
+  permission bits — proves unpacking works with no tar on `PATH`, and proves the hostile archives
+  above are refused. `tools/test-server.mjs` now runs the *entire* suite with a tar that always
+  fails, so every update and rollback in it is exercised on a machine like the one that reported
+  this: 82 checks, and a check that tar was never called once.
+
 ## 1.0.9
 
 - **The interface now follows Apple's Human Interface Guidelines.** Both the app and the admin panel

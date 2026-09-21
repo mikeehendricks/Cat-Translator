@@ -167,7 +167,12 @@ How it works, in order:
    is installed. What gets smoke-tested is exactly what gets written, even if someone pushes meanwhile.
 2. **Download.** `codeload.github.com/<repo>/tar.gz/<sha>`, refusing anything whose top-level
    directory does not carry that sha.
-3. **Stage.** Unpacked into `/var/lib/meow-translator/staging`. The live tree is untouched.
+3. **Stage.** Unpacked into `/var/lib/meow-translator/staging` by `server/lib/archive.js` — the
+   application's own reader, not the system `tar`. It has to be that way: some hosts refuse tar's
+   file creation outright (`Cannot open: Function not implemented`, i.e. `open(2)` returning
+   `ENOSYS` under a seccomp profile or an unusual filesystem) while Node writes to the same
+   directory happily. tar is only tried if the reader fails, and the failure message names the
+   filesystem the staging directory is on. The live tree is untouched at this point.
 4. **Smoke test.** `node server/selftest.js` runs *on the staged copy*: version parses, every server
    module compiles, the app page is present, self-contained and marked up, the admin page is intact,
    and a store + password round trip works in a temp directory.
@@ -368,9 +373,11 @@ node tools/verify-bundle.mjs    # the same, through the shipped single file: 18/
 ## Tests
 
 ```bash
-node tools/test-server.mjs                       # 79 checks: install, auth, visits, updates, rollback
+node tools/test-server.mjs                       # 82 checks: install, auth, visits, updates, rollback
 node tools/test-ui.mjs                           # 71 checks: the app's UI and the interface guidelines
 node tools/test-installed.mjs http://127.0.0.1:8899   # verify a running installation over HTTP
+node tools/test-archive.mjs                      # 32 checks: the tar reader/writer the updater uses
+node tools/test-ownership.mjs                    # 32 checks: run as root, see Tests below
 node server/selftest.js                          # the smoke test the updater runs
 ```
 
@@ -380,7 +387,9 @@ rollback against a stand-in GitHub, and asserts the service account can still re
 afterwards. It exists because that bug shipped once.
 
 `test-server.mjs` stands up a throwaway installation, a stand-in GitHub (a local HTTP server serving
-a tarball of the tree with the version bumped), and drives the real flows: one-time registration,
+a tarball of the tree with the version bumped), and drives the real flows. It does so **with `tar`
+replaced by a script that always fails** — the exact way an update broke on a real host — so an
+update path that quietly reintroduced the dependency would fail the suite rather than the operator: one-time registration,
 CSRF and cross-origin refusals, visit logging with location, a real update *including the restart
 handshake*, a rollback, a deliberately broken download that must not touch the live tree, credential
 changes, login lockout, and privacy mode.
@@ -427,7 +436,7 @@ server/
   server.js              HTTP server, routes, visit capture
   admin.html             the admin panel (single file, no dependencies)
   selftest.js            the smoke test an update must pass
-  lib/                   config, store, auth, geo, stats, updater, restart
+  lib/                   config, store, auth, geo, stats, updater, restart, archive, fsowner
 deploy/                  systemd unit template
 src/                     app sources (lexicon, tokens, engine, synth, match, app, shell)
 design/                  the shared design system (ui.css) and the icon sprite (symbols.html)
