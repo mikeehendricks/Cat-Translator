@@ -35,7 +35,10 @@ const { matchOwnerTree, chownTree, ownerOf, isRoot } = require(path.join(APP_DIR
 
 const cfg = config.load(process.argv.slice(2).filter(a => a.startsWith('--config')));
 const store = new Store(cfg.storePath);
-const updater = new Updater(cfg, store, (lvl, msg) => console.log(`  ${lvl}: ${msg}`));
+/* keep the update log in the store as well as on the terminal: whatever the CLI
+   did has to show up in the /admin panel's update history, the same as an update
+   started from the panel itself */
+const updater = new Updater(cfg, store, (lvl, msg) => { store.log(lvl, msg); console.log(`  ${lvl}: ${msg}`); });
 updater.adoptInstalledTree();
 
 const C = { ok: '\u001b[32m', warn: '\u001b[33m', err: '\u001b[31m', dim: '\u001b[2m', off: '\u001b[0m' };
@@ -147,8 +150,11 @@ const commands = {
     }
     const sha = opt('--sha', null);
     const r = await updater.install({ sha, version: opt('--version', null) });
+    /* the update logged what it did; this process is about to exit, so write it */
+    try { store.save(); } catch (e) { console.log(`  ${C.warn}could not write ${storeFile}: ${e.message}${C.off}`); }
     if (!r.changed) { console.log(`\n  ${r.message}\n`); return; }
     console.log(`\n  ${C.ok}installed v${r.version} (${r.shortSha})${C.off}`);
+    for (const w of (r.warnings || [])) console.log(`  ${C.warn}${w}${C.off}`);
     if (cfg.restartMode === 'off') {
       console.log(`  ${C.warn}restartMode is "off", so the service was not restarted${C.off}`);
       console.log(`  restart it yourself to load the new code:  sudo systemctl restart ${opt('--service', 'meow-translator')}\n`);
@@ -173,7 +179,9 @@ const commands = {
   async rollback() {
     const ref = opt('--to', null);
     const r = await updater.rollback(ref);
+    try { store.save(); } catch (e) { console.log(`  ${C.warn}could not write the store: ${e.message}${C.off}`); }
     console.log(`\n  ${C.ok}rolled back to v${r.version}${r.sha ? ` (${r.sha.slice(0, 8)})` : ''}${C.off}`);
+    for (const w of (r.warnings || [])) console.log(`  ${C.warn}${w}${C.off}`);
     if (cfg.restartMode === 'off') {
       console.log(`  ${C.warn}restartMode is "off", so the service was not restarted${C.off}\n`);
       return;
@@ -291,6 +299,8 @@ const commands = {
     let uid = null;
     try { uid = require('node:child_process').execSync(`id -u ${serviceUser}`, { encoding: 'utf8' }).trim(); } catch (e) {}
     const want = uid !== null ? Number(uid) : null;
+    let gid = null;
+    try { gid = Number(require('node:child_process').execSync(`id -g ${serviceUser}`, { encoding: 'utf8' }).trim()); } catch (e) {}
 
     const checkPath = (label, p, expectOwner) => {
       let st;
@@ -305,11 +315,54 @@ const commands = {
       }
     };
 
+    /**
+     * Ownership problems hide *inside* directories: a snapshot tree written by
+     * root is unreadable and undeletable for the service, which blocks pruning
+     * and rollback. So look at the contents too, not just the top-level entry.
+     */
+    const strayOwners = (root, skip) => {
+      const strays = [];
+      const walk = (p, depth) => {
+        let st; try { st = fs.lstatSync(p); } catch (e) { return; }
+        if (st.uid !== want || st.gid !== gid) strays.push(p);
+        if (st.isDirectory() && depth < 12) {
+          let entries = [];
+          try { entries = fs.readdirSync(p); } catch (e) { return; }
+          for (const e of entries) {
+            if (skip && skip.includes(e)) continue;
+            walk(path.join(p, e), depth + 1);
+          }
+        }
+      };
+      let tops = [];
+      try { tops = fs.readdirSync(root); } catch (e) { return { count: 0, tops: [] }; }
+      for (const t of tops) {
+        if (skip && skip.includes(t)) continue;
+        walk(path.join(root, t), 0);
+      }
+      const names = [...new Set(strays.map(p => path.relative(root, p).split(path.sep)[0]))];
+      return { count: strays.length, tops: names };
+    };
+
     checkPath('application directory', cfg.appDir);
     checkPath('data directory', cfg.dataDir);
     checkPath('store file', cfg.storePath);
     checkPath('version snapshots', cfg.versionsDir);
     checkPath('staging directory', cfg.stagingDir);
+    /* contents of the big trees, ignoring dependencies which are the service's own business */
+    if (want !== null && gid !== null) {
+      for (const [label, root] of [['application directory', cfg.appDir], ['data directory', cfg.dataDir], ['version snapshots', cfg.versionsDir]]) {
+        if (!fs.existsSync(root)) continue;
+        const { count, tops } = strayOwners(root, ['node_modules', '.git']);
+        if (!count) continue;
+        const shown = tops.slice(0, 3).join(', ') + (tops.length > 3 ? `, +${tops.length - 3} more` : '');
+        problems.push(`${count} file(s) inside ${label} belong to another account (${shown}) — the service may be unable to read or delete them`);
+        if (fix && isRoot()) {
+          chownTree(root, { uid: want, gid });
+          fixed.push(`${label} (contents)`);
+        }
+      }
+    }
     /* config.json is deliberately root-owned and group-readable by the service,
        so check readability rather than ownership */
     try {

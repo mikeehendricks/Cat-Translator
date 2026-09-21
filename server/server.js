@@ -516,6 +516,9 @@ async function adminApi(req, res, route, ipInfo) {
     let result;
     try {
       result = await updater.install({ sha: body.sha || null, version: body.version || null });
+      if (result.warnings && result.warnings.length) {
+        for (const w of result.warnings) store.log('warn', w);
+      }
     } catch (e) {
       return json(res, 500, { error: e.message });
     }

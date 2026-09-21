@@ -20,6 +20,10 @@ const DATA = path.join(TMP, 'data');
 const ETC = path.join(TMP, 'etc');
 const PORT = 18000 + Math.floor(Math.random() * 2000);
 const GH_PORT = PORT + 1;
+/** The version the staged tree pretends to be installed as, and the version the
+ *  stand-in GitHub offers. Both are pinned here on purpose: the suite must not
+ *  depend on whatever VERSION the workspace happens to carry. */
+const BASE_VERSION = '1.0.0';
 const REMOTE_VERSION = '1.0.1';
 
 let pass = 0, fail = 0;
@@ -39,11 +43,11 @@ function buildTarball(version, sha) {
   fs.rmSync(work, { recursive: true, force: true });
   fs.mkdirSync(work, { recursive: true });
   const top = path.join(work, `Cat-Translator-${sha}`);
-  const r = spawnSync('bash', ['-c', `mkdir -p ${JSON.stringify(top)} && cd ${JSON.stringify(ROOT)} && tar --exclude=.git --exclude=node_modules --exclude=data -cf - . | (cd ${JSON.stringify(top)} && tar -xf -)`], { encoding: 'utf8' });
+  const r = spawnSync('bash', ['-c', `mkdir -p ${JSON.stringify(top)} && cd ${JSON.stringify(ROOT)} && tar --exclude=.git --exclude=node_modules --exclude=data --exclude=.npm --exclude=.cache --exclude=.local --exclude=.arena -cf - . | (cd ${JSON.stringify(top)} && tar -xf -)`], { encoding: 'utf8' });
   if (r.status !== 0) throw new Error('copy failed: ' + r.stderr);
   fs.writeFileSync(path.join(top, 'VERSION'), version + '\n');
   const appFile = path.join(top, 'cat-translator.html');
-  let html = fs.readFileSync(appFile, 'utf8').replace(/version 1\.0\.0/g, 'version ' + version);
+  let html = fs.readFileSync(appFile, 'utf8').replace(/version \d+\.\d+\.\d+/g, 'version ' + version);
   fs.writeFileSync(appFile, html);
   const tar = path.join(work, 'payload.tar.gz');
   const t = spawnSync('tar', ['-czf', tar, '-C', work, `Cat-Translator-${sha}`], { encoding: 'utf8' });
@@ -192,8 +196,10 @@ async function waitForHealth(timeoutMs) {
   fs.mkdirSync(APP, { recursive: true });
   fs.mkdirSync(DATA, { recursive: true });
   fs.mkdirSync(ETC, { recursive: true });
-  const copy = spawnSync('bash', ['-c', `cd ${JSON.stringify(ROOT)} && tar --exclude=.git --exclude=node_modules --exclude=data -cf - . | (cd ${JSON.stringify(APP)} && tar -xf -)`]);
+  const copy = spawnSync('bash', ['-c', `cd ${JSON.stringify(ROOT)} && tar --exclude=.git --exclude=node_modules --exclude=data --exclude=.npm --exclude=.cache --exclude=.local --exclude=.arena -cf - . | (cd ${JSON.stringify(APP)} && tar -xf -)`]);
   check('staged a copy of the tree for the test', copy.status === 0);
+  /* the staged tree is the "already installed" release, so it says so */
+  fs.writeFileSync(path.join(APP, 'VERSION'), BASE_VERSION + '\n');
   fs.writeFileSync(path.join(ETC, 'config.json'), JSON.stringify({
     host: '127.0.0.1', port: PORT, appDir: APP, dataDir: DATA, restartMode: 'exec', trustProxy: false, sessionHours: 12,
   }, null, 2));
@@ -217,14 +223,14 @@ async function waitForHealth(timeoutMs) {
   startServer();
   const health = await waitForHealth(20000);
   check('server starts and answers /api/health', !!health && !!health.instanceId, 'no health response');
-  check('health reports the installed version', health && health.version === '1.0.0', health && health.version);
+  check('health reports the installed version', health && health.version === BASE_VERSION, health && health.version);
 
   /* ---- 2. the app is served ---------------------------------------------- */
   const page = await get('/');
   check('GET / serves the translator app', page.status === 200 && /MEOW_APP/.test(page.body));
   check('the page carries a Content-Security-Policy', !!page.headers.get('content-security-policy'));
   const ver = await get('/api/version');
-  check('GET /api/version returns a version', ver.body && ver.body.version === '1.0.0', JSON.stringify(ver.body));
+  check('GET /api/version returns a version', ver.body && ver.body.version === BASE_VERSION, JSON.stringify(ver.body));
 
   /* ---- 3. one-time registration ----------------------------------------- */
   const admin = await get('/admin');
@@ -254,7 +260,7 @@ async function waitForHealth(timeoutMs) {
   /* ---- 4. session + admin API ------------------------------------------- */
   const sess = await get('/api/admin/session', { headers: { cookie: cookies } });
   check('session endpoint works with the cookie', sess.status === 200 && sess.body.admin.username === 'mike', JSON.stringify(sess.body).slice(0, 120));
-  check('app version is on the admin session payload', sess.body.app && sess.body.app.version === '1.0.0');
+  check('app version is on the admin session payload', sess.body.app && sess.body.app.version === BASE_VERSION);
 
   /* ---- 5. visits + location --------------------------------------------- */
   for (let i = 0; i < 3; i++) await fetch(BASE() + '/');
@@ -313,20 +319,20 @@ async function waitForHealth(timeoutMs) {
   check('a rollback target is available', histRes.body.history.some(h => h.restorable && !h.current));
 
   const beforeRollback = await waitForHealth(5000);
-  const rb = await post('/api/admin/updates/rollback', { version: '1.0.0' });
-  check('rollback reports success', rb.status === 200 && rb.body.version === '1.0.0', JSON.stringify(rb.body).slice(0, 200));
+  const rb = await post('/api/admin/updates/rollback', { version: BASE_VERSION });
+  check('rollback reports success', rb.status === 200 && rb.body.version === BASE_VERSION, JSON.stringify(rb.body).slice(0, 200));
   const back2 = await waitForFreshHealth(beforeRollback && beforeRollback.instanceId, 45000);
   check('the rollback restarted the process', !!back2,
     `instance before ${beforeRollback && beforeRollback.instanceId}, after ${back2 && back2.instanceId}`);
-  check('the rolled-back service runs v1.0.0 again', back2 && back2.version === '1.0.0', back2 && back2.version);
-  check('the version file was restored', fs.readFileSync(path.join(APP, 'VERSION'), 'utf8').trim() === '1.0.0');
+  check(`the rolled-back service runs v${BASE_VERSION} again`, back2 && back2.version === BASE_VERSION, back2 && back2.version);
+  check('the version file was restored', fs.readFileSync(path.join(APP, 'VERSION'), 'utf8').trim() === BASE_VERSION);
 
   /* ---- 9. a failed update must not touch the live tree ------------------ */
   failDownloads = true;
   const broken = await post('/api/admin/updates/install', { sha: REMOTE_SHA, version: REMOTE_VERSION });
   failDownloads = false;
   check('a failed download is reported as an error', broken.status === 500 && /download/i.test(broken.body.error || ''), JSON.stringify(broken.body).slice(0, 160));
-  check('the live version is untouched by the failure', fs.readFileSync(path.join(APP, 'VERSION'), 'utf8').trim() === '1.0.0');
+  check('the live version is untouched by the failure', fs.readFileSync(path.join(APP, 'VERSION'), 'utf8').trim() === BASE_VERSION);
   const stillUp = await waitForHealth(5000);
   check('the service kept running through the failure', !!stillUp);
 
@@ -373,13 +379,13 @@ async function waitForHealth(timeoutMs) {
     encoding: 'utf8',
     env: Object.assign({}, process.env, { MEOW_CONFIG: path.join(ETC, 'config.json'), MEOW_APP_DIR: APP, MEOW_DATA_DIR: DATA }),
   });
-  check('CLI status runs and shows the version', cliStatus.status === 0 && /installed version\s+v1\.0\.0/.test(cliStatus.stdout),
+  check('CLI status runs and shows the version', cliStatus.status === 0 && new RegExp('installed version\\s+v' + BASE_VERSION.replace(/\./g, '\\.')).test(cliStatus.stdout),
     (cliStatus.stdout + cliStatus.stderr).slice(0, 200));
   const cliVersions = spawnSync(process.execPath, [path.join(APP, 'bin', 'meow-translator'), 'versions'], {
     encoding: 'utf8',
     env: Object.assign({}, process.env, { MEOW_CONFIG: path.join(ETC, 'config.json'), MEOW_APP_DIR: APP, MEOW_DATA_DIR: DATA }),
   });
-  check('CLI versions lists history', cliVersions.status === 0 && /v1\.0\.0/.test(cliVersions.stdout));
+  check('CLI versions lists history', cliVersions.status === 0 && cliVersions.stdout.includes('v' + BASE_VERSION));
   const cliToken = spawnSync(process.execPath, [path.join(APP, 'bin', 'meow-translator'), 'token'], {
     encoding: 'utf8',
     env: Object.assign({}, process.env, { MEOW_CONFIG: path.join(ETC, 'config.json'), MEOW_APP_DIR: APP, MEOW_DATA_DIR: DATA }),

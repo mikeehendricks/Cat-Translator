@@ -270,12 +270,37 @@ class Updater {
     return dir;
   }
 
+  /**
+   * Drop the oldest snapshots beyond `keep`.
+   *
+   * A snapshot can be owned by another account — e.g. one taken by root before
+   * an update, on a host where the data directory later belonged to the service
+   * user. The service then cannot delete it, and that is not a reason to refuse
+   * an update: keep the snapshot, say so, and let `doctor --fix` finish the job.
+   */
   pruneBackups(keep) {
+    if (!Array.isArray(this.warnings)) this.warnings = [];
     const versions = this.store.data.versions;
     keep = keep || 6;
     while (versions.length > keep) {
-      const old = versions.shift();
-      if (old && old.dir) fs.rmSync(old.dir, { recursive: true, force: true });
+      const old = versions[0];
+      if (!old || !old.dir) { versions.shift(); continue; }
+      try {
+        fs.rmSync(old.dir, { recursive: true, force: true });
+      } catch (e) {
+        const who = (() => { try { const st = fs.statSync(old.dir); return `uid ${st.uid}`; } catch (_) { return 'another account'; } })();
+        const hint = (e.code === 'EACCES' || e.code === 'EPERM')
+          ? ` — ${path.basename(old.dir)} is owned by ${who}. Leave it alone? Run: sudo meow-translator doctor --fix`
+          : ` (${e.code || e.message})`;
+        this.warnings = this.warnings || [];
+        this.warnings.push(`could not remove the old snapshot ${path.basename(old.dir)}${hint}`);
+        this.log('warn', `could not remove old snapshot ${path.basename(old.dir)}: ${e.code || e.message}`);
+        /* the CLI is about to exit: flush it, dirty() is debounced */
+        try { this.store.save(); } catch (_) { /* the store writes itself later */ }
+        /* stop pruning rather than reordering wildly; the snapshot stays listed */
+        break;
+      }
+      versions.shift();
     }
   }
 
@@ -347,6 +372,7 @@ class Updater {
 
   async _install(opts) {
     opts = opts || {};
+    this.warnings = [];
     const { repo, branch, token } = this.settings();
     const started = Date.now();
     this.log('info', `update check started for ${repo}@${branch}`);
@@ -419,6 +445,7 @@ class Updater {
         removedStaleFiles: removed,
         backupTaken: true,
         restartRequired: true,
+        warnings: this.warnings.slice(),
         elapsedMs: Date.now() - started,
       };
     } catch (e) {
@@ -432,6 +459,7 @@ class Updater {
 
   /** Restore a backup produced by a previous install. */
   async rollback(ref) {
+    this.warnings = [];
     const versions = this.store.data.versions;
     let entry = null;
     if (ref) {
@@ -473,7 +501,7 @@ class Updater {
     } catch (e) {
       console.error(`[updater] rollback bookkeeping failed: ${e.message}`);
     }
-    return { ok: true, version: entry.version, sha: entry.sha || '', restartRequired: true };
+    return { ok: true, version: entry.version, sha: entry.sha || '', restartRequired: true, warnings: this.warnings.slice() };
   }
 
   /**

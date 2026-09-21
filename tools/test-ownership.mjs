@@ -63,7 +63,7 @@ function prepare() {
   fs.mkdirSync(DATA, { recursive: true });
   fs.mkdirSync(ETC, { recursive: true });
   const copy = spawnSync('bash', ['-c',
-    `cd ${JSON.stringify(ROOT)} && tar --exclude=.git --exclude=node_modules --exclude=data -cf - . | (cd ${JSON.stringify(APP)} && tar -xf -)`]);
+    `cd ${JSON.stringify(ROOT)} && tar --exclude=.git --exclude=node_modules --exclude=data --exclude=.npm --exclude=.cache --exclude=.local --exclude=.arena -cf - . | (cd ${JSON.stringify(APP)} && tar -xf -)`]);
   if (copy.status !== 0) throw new Error('could not stage the tree: ' + copy.stderr);
   fs.chownSync(APP, SERVICE_UID, SERVICE_GID);
   fs.chownSync(DATA, SERVICE_UID, SERVICE_GID);
@@ -86,7 +86,7 @@ function buildPayload() {
   fs.mkdirSync(work, { recursive: true });
   const top = path.join(work, `Cat-Translator-${SHA}`);
   spawnSync('bash', ['-c',
-    `mkdir -p ${JSON.stringify(top)} && cd ${JSON.stringify(ROOT)} && tar --exclude=.git --exclude=node_modules --exclude=data -cf - . | (cd ${JSON.stringify(top)} && tar -xf -)`]);
+    `mkdir -p ${JSON.stringify(top)} && cd ${JSON.stringify(ROOT)} && tar --exclude=.git --exclude=node_modules --exclude=data --exclude=.npm --exclude=.cache --exclude=.local --exclude=.arena -cf - . | (cd ${JSON.stringify(top)} && tar -xf -)`]);
   fs.writeFileSync(path.join(top, 'VERSION'), VERSION + '\n');
   const tar = path.join(work, 'p.tar.gz');
   spawnSync('tar', ['-czf', tar, '-C', work, `Cat-Translator-${SHA}`]);
@@ -120,6 +120,28 @@ function startFakeGitHub(tarball) {
  * spawn would deadlock until the socket timed out (which is exactly what an
  * earlier version of this test did).
  */
+/** Run the CLI as the service account, to prove the service itself is not
+ *  blocked by another account's leftovers. */
+function runCliAs(user, args) {
+  return new Promise(resolve => {
+    const env = Object.assign({}, process.env, {
+      MEOW_APP_DIR: APP, MEOW_DATA_DIR: DATA, MEOW_CONFIG: path.join(ETC, 'config.json'),
+      MEOW_GITHUB_API: `http://127.0.0.1:${GH_PORT}`,
+      MEOW_GITHUB_RAW: `http://127.0.0.1:${GH_PORT}`,
+      MEOW_GITHUB_TAR: `http://127.0.0.1:${GH_PORT}`,
+    });
+    const assigns = Object.entries(env)
+      .filter(([k]) => /^MEOW_|^HOME$|^PATH$/.test(k))
+      .map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(' ');
+    const child = spawn('su', ['-s', '/bin/sh', user, '-c',
+      `${assigns} ${process.execPath} ${JSON.stringify(path.join(APP, 'bin', 'meow-translator'))} --service=meow-own-test ${args.join(' ')}`]);
+    let out = '', err = '';
+    child.stdout.on('data', d => { out += d; });
+    child.stderr.on('data', d => { err += d; });
+    child.on('close', status => resolve({ status, stdout: out, stderr: err }));
+  });
+}
+
 function runCli(args, extraEnv) {
   return new Promise(resolve => {
     const child = spawn(process.execPath, [path.join(APP, 'bin', 'meow-translator'), '--service=meow-own-test', ...args], {
@@ -203,6 +225,77 @@ function runCli(args, extraEnv) {
     check('doctor --fix repairs a root-owned store', /fixed/.test(fix.stdout) || /no problems/.test(fix.stdout),
       fix.stdout.slice(-200).replace(/\n/g, ' '));
     expectService('the store belongs to the service account after --fix', path.join(DATA, 'store.json'));
+
+    /* ---- 7. ownership problems hide inside directories -------------------
+       A snapshot tree written by another account is unreadable and undeletable
+       for the service, which used to abort an update in the middle of pruning.
+       doctor has to look inside, and an undeletable snapshot must never block
+       the update itself. */
+    const snapRoot = path.join(DATA, 'versions', 'stale-root-owned');
+    fs.mkdirSync(snapRoot, { recursive: true });
+    fs.writeFileSync(path.join(snapRoot, 'VERSION'), '0.9.0\n');
+    fs.chownSync(snapRoot, 0, 0);
+    fs.chmodSync(snapRoot, 0o700);
+
+    const doc3 = await runCli(['doctor', '--user', 'daemon', '--skip-unit-check']);
+    check('doctor looks inside the snapshot directory',
+      /belong to another account/.test(doc3.stdout) && /stale-root-owned/.test(doc3.stdout),
+      doc3.stdout.split('\n').filter(l => /!/.test(l)).join(' ').slice(0, 200));
+    const fix3 = await runCli(['doctor', '--user', 'daemon', '--fix', '--skip-unit-check']);
+    check('doctor --fix hands the snapshot back', /fixed/.test(fix3.stdout), fix3.stdout.slice(-160).replace(/\n/g, ' '));
+    expectService('the stale snapshot belongs to the service account', snapRoot);
+
+    /* now the harder one: an old snapshot the service genuinely cannot delete,
+       because it sits in a directory that is not its own */
+    /* A directory can only be deleted if its parent is writable, but the same
+       is true of everything *inside* it — so a root-owned 0755 snapshot tree is
+       undeletable for the service even though versions/ itself is its own.
+       This is exactly what production hit. */
+    const locked = path.join(DATA, 'versions', 'locked-by-root');
+    fs.mkdirSync(path.join(locked, 'server'), { recursive: true });
+    fs.writeFileSync(path.join(locked, 'server', 'server.js'), '// old\n');
+    fs.writeFileSync(path.join(locked, 'VERSION'), '0.8.0\n');
+    fs.chownSync(path.join(locked, 'server'), 0, 0);
+    fs.chownSync(path.join(locked, 'server', 'server.js'), 0, 0);
+    fs.chownSync(path.join(locked, 'VERSION'), 0, 0);
+    fs.chownSync(locked, 0, 0);
+    fs.chmodSync(locked, 0o755);
+    fs.chmodSync(path.join(locked, 'server'), 0o755);
+    expectService('the versions directory itself is still the service\'s', path.join(DATA, 'versions'));
+
+    /* the service drives this update, so no chown happens on its behalf */
+    const before = JSON.parse(fs.readFileSync(path.join(DATA, 'store.json'), 'utf8'));
+    before.versions.unshift({ version: '0.8.0', sha: '', dir: locked, installedAt: 1, kind: 'backup' });
+    for (let i = 0; i < 8; i++) {
+      const d = path.join(DATA, 'versions', `filler-${i}`);
+      if (!fs.existsSync(d)) { fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, 'x'), 'x'); }
+      fs.chownSync(d, SERVICE_UID, SERVICE_GID);
+      before.versions.push({ version: '1.0.0', sha: '', dir: d, installedAt: 2 + i, kind: 'backup' });
+    }
+    fs.writeFileSync(path.join(DATA, 'store.json'), JSON.stringify(before));
+    fs.chownSync(path.join(DATA, 'store.json'), SERVICE_UID, SERVICE_GID);
+
+    const updAsService = await runCliAs('daemon', ['update']);
+    check('an undeletable old snapshot does not block an update',
+      updAsService.status === 0 && /installed v9\.9\.9/.test(updAsService.stdout),
+      (updAsService.stdout + updAsService.stderr).slice(-240).replace(/\n/g, ' '));
+    check('and the operator is told about it',
+      /could not remove the old snapshot/.test(updAsService.stdout + updAsService.stderr),
+      (updAsService.stdout + updAsService.stderr).slice(-240).replace(/\n/g, ' '));
+    const after = JSON.parse(fs.readFileSync(path.join(DATA, 'store.json'), 'utf8'));
+    check('the snapshot it could not delete is still listed',
+      after.versions.some(v => v.dir === locked),
+      JSON.stringify(after.versions.map(v => v.dir ? path.basename(v.dir) : '(none)')));
+    check('the update left a log entry explaining the leftover',
+      after.updateLog.some(l => /could not remove old snapshot/.test(l.message)),
+      JSON.stringify(after.updateLog.slice(-2).map(l => l.message)));
+
+
+    const fix4 = await runCli(['doctor', '--user', 'daemon', '--fix', '--skip-unit-check']);
+    check('doctor --fix clears the leftover snapshot too', /fixed/.test(fix4.stdout),
+      fix4.stdout.split('\n').filter(l => /!|fixed/.test(l)).join(' ').slice(0, 200));
+    expectService('the leftover snapshot is the service\'s now', snapRoot);
+    expectService('and its parent is writable by the service', path.join(DATA, 'versions'));
 
     fs.chownSync(path.join(DATA, 'store.json'), 0, 0);
     const doc2 = await runCli(['doctor', '--user', 'daemon', '--skip-unit-check']);

@@ -172,6 +172,16 @@ GITHUB_TOKEN=<token with Contents: Read and write> ./tools/push-to-github.sh
 It pushes `main` using a credential helper that reads the token from the environment, so the token
 never lands in `.git/config`, in the process list, or in the shell history file.
 
+The CI workflow lives at `deploy/github/ci.yml` rather than in `.github/`, because uploading a
+workflow file needs an extra token permission (below); it is the same file, ready to copy into place:
+
+```sh
+mkdir -p .github/workflows && cp deploy/github/ci.yml .github/workflows/ci.yml
+```
+
+You can also add it through the GitHub web UI (*Add file → Create new file*, name it
+`.github/workflows/ci.yml`). Everything it runs can be executed by hand meanwhile — see *Testing*.
+
 Pushing `.github/workflows/` additionally needs the **Workflows: Read and write** permission
 (fine-grained) or the **`workflow`** scope (classic). Without it GitHub refuses the whole push with
 *"refusing to allow a Personal Access Token to create or update workflow"*. Add that permission and

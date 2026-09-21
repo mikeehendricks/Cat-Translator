@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.0.4
+
+- **An undeletable old snapshot no longer aborts an update.** The service can only prune snapshots
+  it owns; one left behind by another account (a root-run update on an older release) made the
+  whole update fail with `EACCES` while removing `versions/…`. It now keeps the snapshot, reports
+  exactly which one and why, and finishes the update.
+- `doctor` now looks **inside** the application, data and snapshot trees, not just at the top-level
+  entries — stray ownership was hiding in there, invisible to the old check. `--fix` repairs it.
+- CLI-driven updates are written to the store's update log, so they appear in the `/admin` panel's
+  update history exactly like updates started from the panel. Previously the CLI logged to the
+  terminal only, and its warnings vanished when the process exited.
+- Update and rollback warnings are returned to the panel and printed by the CLI instead of being
+  swallowed.
+- The CI workflow ships as `deploy/github/ci.yml`. It cannot live at
+  `.github/workflows/ci.yml` in this repository until the access token carries the *Workflows: Read
+  and write* permission (or the classic `workflow` scope) — GitHub refuses any push that touches a
+  workflow file without it. Copy it into place once that permission is granted. Until then the
+  scripts it runs can be executed by hand; see the README.
+
 ## 1.0.3
 
 - **Regression test for the ownership bug** (`tools/test-ownership.mjs`, run as root, plus a CI
