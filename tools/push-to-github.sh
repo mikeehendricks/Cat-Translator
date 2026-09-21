@@ -108,6 +108,14 @@ else
   sed 's/^/    /' /tmp/.meow-push-err >&2
   rm -f /tmp/.meow-push-err
   echo >&2
+  if grep -q 'workflow' /tmp/.meow-push-err 2>/dev/null || true; then
+    echo "  This push touches .github/workflows/, which needs an extra permission:" >&2
+    echo "    fine-grained token -> Workflows: Read and write" >&2
+    echo "    classic token      -> the 'workflow' scope" >&2
+    echo "  Either add it and push again, or add the workflow file through the" >&2
+    echo "  GitHub web UI (Add file -> Create new file)." >&2
+    echo >&2
+  fi
   echo "  If it says the branch is behind or non-fast-forward, the remote has" >&2
   echo "  commits this checkout does not:  git pull --rebase origin $BRANCH" >&2
   exit "$STATUS"

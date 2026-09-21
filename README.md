@@ -172,6 +172,11 @@ GITHUB_TOKEN=<token with Contents: Read and write> ./tools/push-to-github.sh
 It pushes `main` using a credential helper that reads the token from the environment, so the token
 never lands in `.git/config`, in the process list, or in the shell history file.
 
+Pushing `.github/workflows/` additionally needs the **Workflows: Read and write** permission
+(fine-grained) or the **`workflow`** scope (classic). Without it GitHub refuses the whole push with
+*"refusing to allow a Personal Access Token to create or update workflow"*. Add that permission and
+push again, or leave the workflow file untracked and add it through the GitHub web UI.
+
 **Releasing a new version** means: bump `VERSION`, commit, push. Installed servers then see it:
 
 ```bash
@@ -196,6 +201,7 @@ Rebuild `cat-translator.html` (`node tools/build-app.mjs`) before bumping if you
 | service stopped and never came back | the unit needs `Restart=always` for the updater's exit-and-return restart. `sudo meow-translator install-service` rewrites it from the deployed template. |
 | forgot the admin password | `sudo meow-translator reset-password` (also signs out every session). |
 | forgot the setup token | `sudo meow-translator token` prints it; `--rotate` mints a new one. |
+| anything looks broken | `sudo meow-translator doctor` — ownership, store readability, the unit and disk space; `--fix` repairs what it can. |
 | "registration is closed" and you want a fresh install | `sudo meow-translator reset-password` claims the account directly, or remove the store with `sudo rm /var/lib/meow-translator/store.json` and restart (this deletes visits too). |
 
 Logs: `journalctl -u meow-translator -f` · Data: `/var/lib/meow-translator` · Backups:
@@ -217,6 +223,7 @@ sudo meow-translator install-service        # refresh the systemd unit after an 
 sudo meow-translator setup-https cat.example.com --email you@example.com
 sudo meow-translator logs -n 100
 sudo meow-translator geo-probe              # is the location provider reachable?
+sudo meow-translator doctor [--fix]         # check ownership, readability, the unit, free space
 ```
 
 Uninstall:
@@ -285,6 +292,11 @@ node tools/test-ui.mjs                           # jsdom UI test of the app (nee
 node tools/test-installed.mjs http://127.0.0.1:8899   # verify a running installation over HTTP
 node server/selftest.js                          # the smoke test the updater runs
 ```
+
+`test-ownership.mjs` (run as root: `sudo node tools/test-ownership.mjs`, or the CI step) builds an
+installation owned by a *different* account, drives a root-run CLI command and a real update plus
+rollback against a stand-in GitHub, and asserts the service account can still read everything
+afterwards. It exists because that bug shipped once.
 
 `test-server.mjs` stands up a throwaway installation, a stand-in GitHub (a local HTTP server serving
 a tarball of the tree with the version bumped), and drives the real flows: one-time registration,

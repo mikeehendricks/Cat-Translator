@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.3
+
+- **Regression test for the ownership bug** (`tools/test-ownership.mjs`, run as root, plus a CI
+  step): it builds an installation owned by a different account, drives a root-run CLI command and
+  a real update plus rollback against a stand-in GitHub, and asserts the service account can still
+  read everything.
+- Snapshot and staging directories now inherit the data directory's owner, including the first time
+  a root-run command creates them.
+- `meow-translator update` and `rollback` honour `restartMode: "off"` instead of restarting anyway,
+  and accept `--flag=value` as well as `--flag value`.
+- `doctor --skip-unit-check`, for hosts that do not run the systemd unit.
+
 ## 1.0.2
 
 Fixes a bug that could take the service down after a command-line update.
