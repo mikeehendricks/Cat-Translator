@@ -27,6 +27,7 @@ const os = require('node:os');
 const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
 const { Readable } = require('node:stream');
+const { matchOwner, matchOwnerTree, chownTree, ownerOf, isRoot } = require('./fsowner');
 
 const PROTECTED = new Set(['.git', 'node_modules', 'data', '.env', 'local']);
 
@@ -233,6 +234,9 @@ class Updater {
     const dir = path.join(this.cfg.versionsDir, `${cur.version}-${sha8(cur.sha) || 'local'}-${Date.now()}`);
     fs.mkdirSync(dir, { recursive: true });
     copyTree(this.cfg.appDir, dir, {});
+    /* root may be the one taking this snapshot; the service has to be able to
+       read it back to roll back */
+    matchOwnerTree(dir, this.cfg.versionsDir);
     this.store.data.versions.push({
       version: cur.version,
       sha: cur.sha,
@@ -369,10 +373,18 @@ class Updater {
       this.log('info', `smoke test passed on staged copy: ${smoke}`);
 
       /* from here on we are changing the live install */
+      const appOwner = ownerOf(this.cfg.appDir);      // who owns the live tree now
       this.backup(`before ${version}`, opts.kind || 'upgrade');
       copyTree(tree, this.cfg.appDir, {});
       const removed = removeExtras(tree, this.cfg.appDir);
       fs.writeFileSync(this.cfg.versionFile, version + '\n');
+      /* A root-run update must leave the deployed tree owned by the service
+         account, exactly as it was before — otherwise the panel's own updater
+         can no longer write there, and the next root run cannot read the store. */
+      if (isRoot() && appOwner) {
+        chownTree(this.cfg.appDir, appOwner);
+        try { fs.chownSync(this.cfg.versionFile, appOwner.uid, appOwner.gid); } catch (e) {}
+      }
 
       this.store.data.app = {
         version, sha, installedAt: Date.now(),
@@ -413,10 +425,15 @@ class Updater {
     if (!fs.existsSync(entry.dir)) throw new Error(`the backup for ${entry.version} is gone from disk`);
     if (entry.sha && entry.sha === this.store.data.app.sha) throw new Error('that backup is the version already running');
 
+    const appOwner = ownerOf(this.cfg.appDir);
     this.backup(`before rollback to ${entry.version}`, 'pre-rollback');
     copyTree(entry.dir, this.cfg.appDir, {});
     removeExtras(entry.dir, this.cfg.appDir);
     fs.writeFileSync(this.cfg.versionFile, entry.version + '\n');
+    if (isRoot() && appOwner) {
+      chownTree(this.cfg.appDir, appOwner);
+      try { fs.chownSync(this.cfg.versionFile, appOwner.uid, appOwner.gid); } catch (e) {}
+    }
     this.store.data.app = {
       version: entry.version,
       sha: entry.sha || '',

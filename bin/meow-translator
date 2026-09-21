@@ -14,6 +14,7 @@
  *   sudo meow-translator setup-https DOMAIN [EMAIL]
  *   sudo meow-translator logs [-n 50]
  *   sudo meow-translator geo-probe
+ *   sudo meow-translator doctor [--fix]
  *
  * Everything here works on the same files the service uses, so it can be run
  * while the service is up.
@@ -30,6 +31,7 @@ const { Store } = require(path.join(APP_DIR, 'server', 'lib', 'store.js'));
 const auth = require(path.join(APP_DIR, 'server', 'lib', 'auth.js'));
 const { Updater } = require(path.join(APP_DIR, 'server', 'lib', 'updater.js'));
 const { Geo } = require(path.join(APP_DIR, 'server', 'lib', 'geo.js'));
+const { matchOwnerTree, chownTree, ownerOf, isRoot } = require(path.join(APP_DIR, 'server', 'lib', 'fsowner.js'));
 
 const cfg = config.load(process.argv.slice(2).filter(a => a.startsWith('--config')));
 const store = new Store(cfg.storePath);
@@ -268,6 +270,93 @@ const commands = {
     const rec = await geo.probe();
     if (rec) console.log(`\n  ${C.ok}geolocation works${C.off} 8.8.8.8 -> ${rec.city}, ${rec.region}, ${rec.country} (${rec.isp})\n`);
     else { console.log(`\n  ${C.warn}geolocation failed${C.off} — no provider answered. Outbound HTTPS may be blocked; visit locations will stay unknown.\n`); process.exitCode = 1; }
+  },
+
+  /** Check the things that break in practice, and fix the ones that are ours to fix. */
+  async doctor() {
+    const fix = flag('--fix') || flag('--yes');
+    const problems = [], fixed = [], notes = [];
+    const serviceUser = opt('--user', 'meow');
+    let uid = null;
+    try { uid = require('node:child_process').execSync(`id -u ${serviceUser}`, { encoding: 'utf8' }).trim(); } catch (e) {}
+    const want = uid !== null ? Number(uid) : null;
+
+    const checkPath = (label, p, expectOwner) => {
+      let st;
+      try { st = fs.statSync(p); } catch (e) { notes.push(`${label}: ${p} does not exist`); return; }
+      if (want === null) return;
+      if (st.uid === want) return;
+      problems.push(`${label} is owned by uid ${st.uid}, but the service runs as ${serviceUser} (uid ${want})`);
+      if (fix && isRoot()) {
+        if (st.isDirectory()) chownTree(p, { uid: want, gid: Number(require('node:child_process').execSync(`id -g ${serviceUser}`, { encoding: 'utf8' }).trim()) });
+        else fs.chownSync(p, want, Number(require('node:child_process').execSync(`id -g ${serviceUser}`, { encoding: 'utf8' }).trim()));
+        fixed.push(label);
+      }
+    };
+
+    checkPath('application directory', cfg.appDir);
+    checkPath('data directory', cfg.dataDir);
+    checkPath('store file', cfg.storePath);
+    checkPath('version snapshots', cfg.versionsDir);
+    checkPath('staging directory', cfg.stagingDir);
+    /* config.json is deliberately root-owned and group-readable by the service,
+       so check readability rather than ownership */
+    try {
+      const st = fs.statSync(cfg.configPath);
+      const group = Number(require('node:child_process').execSync(`id -g ${serviceUser}`, { encoding: 'utf8' }).trim());
+      const groupReadable = (st.mode & 0o040) !== 0 && st.gid === group;
+      if (!groupReadable) {
+        problems.push(`configuration is not readable by the ${serviceUser} group (mode ${(st.mode & 0o777).toString(8)}, gid ${st.gid})`);
+      }
+    } catch (e) { /* no config file is fine: defaults are used */ }
+
+    /* can the service actually read its store? */
+    try {
+      fs.accessSync(cfg.storePath, fs.constants.R_OK);
+    } catch (e) {
+      problems.push(`the store is not readable: ${e.message}`);
+    }
+    /* is the deployed tree the one the store thinks is deployed? */
+    const fileVersion = fs.existsSync(cfg.versionFile) ? fs.readFileSync(cfg.versionFile, 'utf8').trim() : null;
+    if (!fileVersion) problems.push('VERSION file is missing from the application directory');
+    else if (fileVersion !== store.data.app.version) {
+      notes.push(`VERSION says ${fileVersion}, the store says ${store.data.app.version} (the store follows the file on the next start)`);
+    }
+    /* is the unit the one we ship? */
+    if (sh('command -v systemctl').out.trim()) {
+      const unitPath = `/etc/systemd/system/${opt('--service', 'meow-translator')}.service`;
+      if (!fs.existsSync(unitPath)) problems.push(`no systemd unit at ${unitPath} — run: meow-translator install-service`);
+      else {
+        const unit = fs.readFileSync(unitPath, 'utf8');
+        if (!/Restart=always/.test(unit)) problems.push('the unit does not say Restart=always, so the updater cannot restart the service by exiting');
+        if (!new RegExp(`User=${serviceUser}`).test(unit)) notes.push(`the unit does not run as ${serviceUser}`);
+        const template = path.join(APP_DIR, 'deploy', 'meow-translator.service');
+        if (fs.existsSync(template) && !/Restart=always/.test(fs.readFileSync(template, 'utf8'))) notes.push('the shipped unit template lost Restart=always');
+      }
+    }
+    /* disk space for downloads and snapshots */
+    try {
+      const st = require('node:child_process').execSync(`df -Pk ${cfg.dataDir} | tail -1`, { encoding: 'utf8' }).trim().split(/\s+/);
+      const freeKb = Number(st[3]);
+      notes.push(`free space on the data filesystem: ${(freeKb / 1024).toFixed(0)} MB`);
+      if (freeKb < 200 * 1024) problems.push(`only ${(freeKb / 1024).toFixed(0)} MB free — an update needs room for the archive and a snapshot`);
+    } catch (e) {}
+
+    console.log('');
+    for (const n of notes) console.log(`  ${C.dim}·${C.off} ${n}`);
+    if (!problems.length) {
+      console.log(`\n  ${C.ok}no problems found${C.off}\n`);
+      return;
+    }
+    console.log('');
+    for (const p of problems) console.log(`  ${C.warn}!${C.off} ${p}`);
+    if (fixed.length) {
+      console.log(`\n  ${C.ok}fixed${C.off}: ${fixed.join(', ')}`);
+      console.log(`  restart the service to pick it up:  sudo systemctl restart ${opt('--service', 'meow-translator')}\n`);
+    } else if (!fix) {
+      console.log(`\n  re-run with --fix to repair the ownership problems:\n    sudo meow-translator doctor --fix\n`);
+      process.exitCode = 1;
+    }
   },
 
   async help() {

@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.0.2
+
+Fixes a bug that could take the service down after a command-line update.
+
+- **Ownership is preserved when root runs the tooling.** `sudo meow-translator update`
+  wrote the store and the application tree as root, which left the data directory unreadable
+  to the unprivileged service account — the service then failed to start and its error looked
+  like the visit log and credentials had vanished. Every root-run write path now hands the
+  result back to the account that owns the surrounding directory, before and after a swap.
+- **`meow-translator doctor`** checks the installation (ownership of the app, data, store and
+  snapshot directories, store readability, `Restart=always` in the unit, free space) and
+  `--fix` repairs what it can.
+- Store permission errors now name the directory to chown and the service to restart, and are
+  never treated as a corrupt file.
+
 ## 1.0.1
 
 - `meow-translator update --check` now names the case instead of guessing: identical commit,
