@@ -674,7 +674,14 @@ async function main() {
 
   server.on('error', err => {
     if (err.code === 'EADDRINUSE') {
-      log('error', `port ${cfg.port} is already in use (another copy still running?)`);
+      log('error', `port ${cfg.port} is already in use — another copy of the service, or a web server, is holding it`);
+      log('error', `  find it with: sudo ss -ltnp | grep :${cfg.port}   ·   or run on another port: sudo meow-translator config --port 8080`);
+      process.exit(1);
+    }
+    if (err.code === 'EACCES' || err.code === 'EPERM') {
+      log('error', `not allowed to bind port ${cfg.port} (ports below 1024 need CAP_NET_BIND_SERVICE)`);
+      log('error', '  as a service: sudo meow-translator install-service   (the unit grants that capability)');
+      log('error', `  as a developer: run it on a high port instead, e.g. MEOW_PORT=8787 node server/server.js`);
       process.exit(1);
     }
     log('error', `server error: ${err.message}`);

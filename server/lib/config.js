@@ -15,8 +15,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const DEFAULTS = {
-  host: '127.0.0.1',              // nginx terminates TLS in front; use 0.0.0.0 to expose directly
-  port: 8787,
+  host: '0.0.0.0',                // reachable from outside; use 127.0.0.1 to keep it local
+  port: 80,                       // the web port; the unit grants CAP_NET_BIND_SERVICE for it
   appDir: '/opt/meow-translator', // code + the single-file app; replaced by updates
   dataDir: '/var/lib/meow-translator', // store.json, backups, update staging — never touched by updates
   configPath: '/etc/meow-translator/config.json',

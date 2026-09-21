@@ -3,6 +3,7 @@
 /**
  * Server-side control tool.
  *
+ *   sudo meow-translator config [--port N] [--host ADDR]
  *   sudo meow-translator status
  *   sudo meow-translator token [--rotate]
  *   sudo meow-translator update [--check] [--sha <commit>]
@@ -111,6 +112,68 @@ const commands = {
       console.log(`    update source       ${store.data.settings.githubRepo}@${store.data.settings.updateChannel} ${C.dim}(not checked yet)${C.off}`);
     }
     console.log('');
+  },
+
+  /**
+   * Change how the service runs — at present, the address it listens on.
+   *
+   * The unit is the other half of this: a port below 1024 needs
+   * CAP_NET_BIND_SERVICE, so the unit is refreshed from the deployed template
+   * whenever the port changes into (or out of) the privileged range.
+   */
+  async config() {
+    const portArg = opt('--port', null);
+    const hostArg = opt('--host', null);
+    if (portArg === null && hostArg === null) {
+      console.log(`\n  host  ${cfg.host}\n  port  ${cfg.port}\n  file  ${cfg.configPath}\n`);
+      console.log(`  change it:  sudo meow-translator config --port 8080 --host 127.0.0.1\n`);
+      return;
+    }
+    const next = { host: cfg.host, port: cfg.port };
+    if (hostArg) next.host = hostArg;
+    if (portArg !== null) {
+      const p = Number(portArg);
+      if (!Number.isInteger(p) || p < 1 || p > 65535) { console.error(`  ${portArg} is not a port number (1-65535)`); process.exitCode = 1; return; }
+      next.port = p;
+    }
+    if (!/^[0-9a-fA-F.:\[\]]+$|^[a-zA-Z0-9.-]+$/.test(next.host)) { console.error(`  ${next.host} does not look like an address`); process.exitCode = 1; return; }
+
+    /* read the file as it is so unrelated keys survive the edit */
+    let raw = {};
+    try { raw = JSON.parse(fs.readFileSync(cfg.configPath, 'utf8')); } catch (e) { /* defaults are fine */ }
+    raw.host = next.host;
+    raw.port = next.port;
+    const st = (() => { try { return fs.statSync(cfg.configPath); } catch (e) { return null; } })();
+    fs.mkdirSync(path.dirname(cfg.configPath), { recursive: true });
+    fs.writeFileSync(cfg.configPath, JSON.stringify(raw, null, 2) + '\n', { mode: 0o640 });
+    if (st) { try { fs.chownSync(cfg.configPath, 0, st.gid); fs.chmodSync(cfg.configPath, st.mode & 0o777); } catch (e) {} }
+    console.log(`\n  ${C.ok}config updated${C.off}: ${next.host}:${next.port}  (${cfg.configPath})`);
+
+    /* a port below 1024 needs the capability in the unit */
+    const unitPath = `/etc/systemd/system/${opt('--service', 'meow-translator')}.service`;
+    if (next.port < 1024) {
+      const template = path.join(APP_DIR, 'deploy', 'meow-translator.service');
+      const needs = fs.existsSync(unitPath) && !/^AmbientCapabilities=.*CAP_NET_BIND_SERVICE/m.test(fs.readFileSync(unitPath, 'utf8'));
+      if (needs && fs.existsSync(template)) {
+        const text = fs.readFileSync(template, 'utf8')
+          .replace(/^User=.*$/m, `User=${opt('--user', 'meow')}`)
+          .replace(/^Group=.*$/m, `Group=${opt('--user', 'meow')}`)
+          .replace(/^WorkingDirectory=.*$/m, `WorkingDirectory=${cfg.appDir}`)
+          .replace(/^ExecStart=.*$/m, `ExecStart=${process.execPath} ${cfg.appDir}/server/server.js`)
+          .replace(/^ReadWritePaths=.*$/m, `ReadWritePaths=${cfg.appDir} ${cfg.dataDir}`);
+        fs.writeFileSync(unitPath, text);
+        sh('systemctl daemon-reload');
+        console.log(`  ${C.ok}service unit refreshed${C.off} — port ${next.port} needs CAP_NET_BIND_SERVICE`);
+      }
+    }
+    if (sh('command -v systemctl').out.trim() && fs.existsSync(unitPath)) {
+      const r = sh(`systemctl restart ${opt('--service', 'meow-translator')}`);
+      console.log(r.code === 0 ? `  ${C.ok}service restarted${C.off} on ${next.host}:${next.port}\n` : `  ${C.warn}restart reported: ${r.out.trim()}${C.off}\n`);
+    } else {
+      console.log('  restart the service to apply it\n');
+    }
+    console.log(`  app    http://${next.host === '0.0.0.0' ? 'localhost' : next.host}:${next.port}/`);
+    console.log(`  admin  http://${next.host === '0.0.0.0' ? 'localhost' : next.host}:${next.port}/admin\n`);
   },
 
   async token() {

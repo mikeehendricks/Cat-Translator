@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.0.7
+
+- **Port 80 is the default.** `sudo ./install.sh` (or `curl … | sudo bash`) now installs on port 80,
+  reachable from outside, instead of 8787 on localhost only. `server/lib/config.js` defaults match,
+  so a bare `node server/server.js` agrees with the installer.
+- **New command: `meow-translator config [--port N] [--host ADDR]`.** Changes the address, keeps the
+  other settings, refreshes the unit when the new port is privileged, and restarts the service — no
+  need to re-run the installer just to move a port.
+- **The installer refuses to fight another web server for the port.** If something other than this
+  app is already listening, it names the process and stops before changing anything, instead of
+  installing a service that cannot bind. If the port is already served by this app, it says so and
+  reinstalls over it.
+- A bind failure now explains itself: `EACCES` prints the two ways out (the unit's capability, or a
+  high port for development), and `EADDRINUSE` points at `ss` and `meow-translator config`.
+- The installer says, plainly, what an exposed plain-HTTP port means: open the firewall, the admin
+  password crosses the network unencrypted until you add HTTPS, and the microphone needs HTTPS.
+- Fixed a silent failure in the installer's port check: closing a file descriptor it never opened
+  (`exec 3<&-`) made the script exit with no message at all, because a failing `exec` redirection
+  ends a non-interactive shell.
+
 ## 1.0.6
 
 - **The service can run on a privileged port.** `sudo ./install.sh --port 80 --host 0.0.0.0` now

@@ -27,8 +27,8 @@ RUN_USER=meow
 APP_DIR=/opt/meow-translator
 DATA_DIR=/var/lib/meow-translator
 CONF_DIR=/etc/meow-translator
-PORT=8787
-HOST=127.0.0.1
+PORT=80
+HOST=0.0.0.0
 WITH_NGINX=0
 DOMAIN=""
 EMAIL=""
@@ -47,8 +47,9 @@ usage() {
   cat <<USAGE
 Meow translator installer
 
-  --port N              port to listen on (default $PORT, kept on $HOST)
-  --host ADDR           bind address (default $HOST; use 0.0.0.0 to expose directly)
+  --port N              port to listen on (default $PORT)
+  --host ADDR           bind address (default $HOST — reachable from outside the box;
+                        use 127.0.0.1 to keep it local to the machine)
   --user NAME           service account (default $RUN_USER)
   --app-dir PATH        install path (default $APP_DIR)
   --data-dir PATH       data path (default $DATA_DIR)
@@ -145,6 +146,23 @@ NPM_EXISTS=0; command -v npm >/dev/null 2>&1 && NPM_EXISTS=1
 ok "using $NODE_BIN"
 
 # ------------------------------------------------------------------ account
+# The default is the public web port, which is often already taken by a web
+# server. Say so plainly instead of installing a service that cannot bind.
+say "checking that port $PORT is free"
+if curl -fsS --max-time 2 "http://127.0.0.1:$PORT/healthz" 2>/dev/null | grep -q '"ok":true'; then
+  ok "port $PORT is already serving this app — it will be restarted"
+elif (exec 3<>"/dev/tcp/127.0.0.1/$PORT") 2>/dev/null; then
+  # the file descriptor lives inside the subshell above and closes with it; do not
+  # close it here with `exec 3<&-` — in a non-interactive shell a failing exec
+  # redirection exits the whole script, silently
+  OWNER="$(ss -ltnp 2>/dev/null | awk -v p=":$PORT" '$4 ~ p {print $NF}' | head -1)"
+  warn "port $PORT is already in use by something else${OWNER:+ ($OWNER)}"
+  warn "  a web server such as nginx or apache2 may be holding it."
+  warn "  options: stop it (sudo systemctl stop nginx), pick another port"
+  warn "  (--port 8080), or keep it and put this app behind it (--with-nginx)."
+  die "refusing to install a service that cannot bind port $PORT"
+fi
+
 say "creating the service account and directories"
 if id "$RUN_USER" >/dev/null 2>&1; then
   ok "user $RUN_USER already exists"
@@ -414,6 +432,22 @@ $(printf '%s' "$TOKEN_BLOCK")
   Open ${URL%/}/admin and use that token to create your admin account.
 
 REPORT
+
+# An exposed plain-HTTP port is the common case now, and it has two consequences
+# worth saying out loud rather than leaving to the operator to remember.
+if [ "$HOST" = "0.0.0.0" ]; then
+  cat <<EXPOSED
+  This instance listens on every interface, on the plain HTTP port $PORT.
+  To let it in, open the firewall:   sudo ufw allow $PORT/tcp
+  Over plain HTTP the admin password crosses the network in the clear, and
+  browsers refuse microphone access without HTTPS. For a public server, point a
+  domain at this box and run:
+      sudo meow-translator setup-https your.domain.com you@example.com
+  That installs nginx + Let's Encrypt, serves the app on 443, redirects $PORT
+  to it, and records real visitor addresses. Keep trustProxy=false until then.
+
+EXPOSED
+fi
 
 if [ "$WITH_NGINX" = 1 ] && [ -z "$DOMAIN" ]; then
   cat <<NOTE

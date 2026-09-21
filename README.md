@@ -27,6 +27,11 @@ On a fresh Ubuntu box (20.04 / 22.04 / 24.04):
 curl -fsSL https://raw.githubusercontent.com/mikeehendricks/Cat-Translator/main/install.sh | sudo bash
 ```
 
+**The installer puts the app on port 80, reachable from outside.** Node.js, the service account, the
+systemd unit (with the one capability port 80 needs) and the firewall are covered below. Two things
+it cannot do for you: stop another web server that is already holding port 80 — it detects that and
+refuses with instructions instead of installing a service that cannot start — and give you HTTPS.
+
 or from a checkout:
 
 ```bash
@@ -45,14 +50,22 @@ sudo ./install.sh --port 80 --host 0.0.0.0                           # the bare 
 sudo ./install.sh --help                                            # all options
 ```
 
-### Running on port 80 (or 443, or any port below 1024)
+### Changing the port
 
 ```bash
-sudo ./install.sh --port 80 --host 0.0.0.0
+sudo meow-translator config                        # show what it listens on now
+sudo meow-translator config --port 8080            # change it and restart the service
+sudo meow-translator config --port 80 --host 127.0.0.1   # port 80, but only from this machine
 ```
 
-The service does **not** run as root, so it cannot bind a privileged port on its own. The unit
-therefore grants exactly one capability:
+`config` edits `/etc/meow-translator/config.json`, keeps every other setting, refreshes the systemd
+unit if the new port is privileged, and restarts. Re-running the installer with `--port` does the
+same thing.
+
+### Running on port 80 (or 443, or any port below 1024)
+
+Port 80 is the default, and the service does **not** run as root, so it cannot bind a privileged
+port on its own. The unit therefore grants exactly one capability:
 
 ```ini
 AmbientCapabilities=CAP_NET_BIND_SERVICE
@@ -251,6 +264,7 @@ Logs: `journalctl -u meow-translator -f` · Data: `/var/lib/meow-translator` · 
 
 ```bash
 sudo meow-translator status                 # version, service state, URL, visit count
+sudo meow-translator config [--port N] [--host ADDR]   # what it listens on, and how to change it
 sudo meow-translator token [--rotate]       # print or rotate the one-time setup token
 sudo meow-translator update [--check|--sha <commit>]
 sudo meow-translator versions               # installed history with snapshots
