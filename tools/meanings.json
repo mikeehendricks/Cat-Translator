@@ -1,0 +1,1417 @@
+[
+ {
+  "canon": "i",
+  "aliases": [
+   "i",
+   "me",
+   "my",
+   "mine",
+   "myself"
+  ],
+  "tone": "flat",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "you",
+  "aliases": [
+   "you",
+   "your",
+   "yours",
+   "yourself"
+  ],
+  "tone": "rise",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "we",
+  "aliases": [
+   "we",
+   "us",
+   "our",
+   "ours"
+  ],
+  "tone": "flat",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "they",
+  "aliases": [
+   "they",
+   "them",
+   "their",
+   "theirs"
+  ],
+  "tone": "flat",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "he",
+  "aliases": [
+   "he",
+   "him",
+   "his"
+  ],
+  "tone": "arch",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "she",
+  "aliases": [
+   "she",
+   "her",
+   "hers"
+  ],
+  "tone": "arch",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "it",
+  "aliases": [
+   "it",
+   "its",
+   "this",
+   "that"
+  ],
+  "tone": "arch",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "human",
+  "aliases": [
+   "human",
+   "humans",
+   "person",
+   "people",
+   "hooman",
+   "hoomans"
+  ],
+  "tone": "flat",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "cat",
+  "aliases": [
+   "cat",
+   "cats",
+   "kitty",
+   "kitten",
+   "kittens"
+  ],
+  "tone": "rise",
+  "len": "short",
+  "special": null
+ },
+ {
+  "canon": "friend",
+  "aliases": [
+   "friend",
+   "friends",
+   "buddy"
+  ],
+  "tone": "rise",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "family",
+  "aliases": [
+   "family",
+   "mom",
+   "mother",
+   "dad",
+   "father",
+   "owner",
+   "staff"
+  ],
+  "tone": "fall",
+  "len": "long",
+  "special": null
+ },
+ {
+  "canon": "hello",
+  "aliases": [
+   "hello",
+   "hi",
+   "hey",
+   "yo",
+   "hiya"
+  ],
+  "tone": "rise",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "bye",
+  "aliases": [
+   "bye",
+   "goodbye",
+   "farewell"
+  ],
+  "tone": "fall",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "please",
+  "aliases": [
+   "please"
+  ],
+  "tone": "dip",
+  "len": "short",
+  "special": null
+ },
+ {
+  "canon": "thanks",
+  "aliases": [
+   "thanks",
+   "thank",
+   "thankyou"
+  ],
+  "tone": "rise",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "sorry",
+  "aliases": [
+   "sorry"
+  ],
+  "tone": "fall",
+  "len": "long",
+  "special": null
+ },
+ {
+  "canon": "yes",
+  "aliases": [
+   "yes",
+   "yeah",
+   "yep",
+   "yup",
+   "sure"
+  ],
+  "tone": "rise",
+  "len": "short",
+  "special": null
+ },
+ {
+  "canon": "no",
+  "aliases": [
+   "no",
+   "nope",
+   "nah",
+   "nothing",
+   "never"
+  ],
+  "tone": "fall",
+  "len": "long",
+  "special": null
+ },
+ {
+  "canon": "maybe",
+  "aliases": [
+   "maybe",
+   "perhaps",
+   "possibly"
+  ],
+  "tone": "dip",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "welcome",
+  "aliases": [
+   "welcome",
+   "pleased"
+  ],
+  "tone": "rise",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "excuse",
+  "aliases": [
+   "excuse",
+   "oops",
+   "pardon"
+  ],
+  "tone": "rise",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "huh",
+  "aliases": [
+   "huh",
+   "eh"
+  ],
+  "tone": "rise",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "um",
+  "aliases": [
+   "um",
+   "hmm",
+   "erm"
+  ],
+  "tone": "flat",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "ugh",
+  "aliases": [
+   "ugh",
+   "yuck",
+   "gross",
+   "bleh"
+  ],
+  "tone": "fall",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "wow",
+  "aliases": [
+   "wow",
+   "ooh"
+  ],
+  "tone": "arch",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "oh",
+  "aliases": [
+   "oh"
+  ],
+  "tone": "flat",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "ow",
+  "aliases": [
+   "ow",
+   "ouch"
+  ],
+  "tone": "fall",
+  "len": "short",
+  "special": null
+ },
+ {
+  "canon": "eek",
+  "aliases": [
+   "eek",
+   "eeek"
+  ],
+  "tone": "rise",
+  "len": "short",
+  "special": null
+ },
+ {
+  "canon": "meow",
+  "aliases": [
+   "meow",
+   "mew",
+   "meoww"
+  ],
+  "tone": "arch",
+  "len": "long",
+  "special": null
+ },
+ {
+  "canon": "food",
+  "aliases": [
+   "food",
+   "eat",
+   "eating",
+   "dinner",
+   "breakfast",
+   "lunch",
+   "snack",
+   "meal"
+  ],
+  "tone": "rise",
+  "len": "long",
+  "special": null
+ },
+ {
+  "canon": "treat",
+  "aliases": [
+   "treat",
+   "treats",
+   "yummy",
+   "nummy"
+  ],
+  "tone": "arch",
+  "len": "long",
+  "special": null
+ },
+ {
+  "canon": "fish",
+  "aliases": [
+   "fish",
+   "tuna",
+   "salmon",
+   "chicken",
+   "meat",
+   "shrimp"
+  ],
+  "tone": "arch",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "water",
+  "aliases": [
+   "water",
+   "drink",
+   "thirsty",
+   "milk",
+   "cream"
+  ],
+  "tone": "rise",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "hungry",
+  "aliases": [
+   "hungry",
+   "starving",
+   "empty",
+   "famished"
+  ],
+  "tone": "rise",
+  "len": "long",
+  "special": null
+ },
+ {
+  "canon": "grass",
+  "aliases": [
+   "grass",
+   "plant",
+   "plants",
+   "leaves"
+  ],
+  "tone": "rise",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "want",
+  "aliases": [
+   "want",
+   "wants",
+   "wanna",
+   "need",
+   "needs"
+  ],
+  "tone": "arch",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "more",
+  "aliases": [
+   "more",
+   "another",
+   "extra"
+  ],
+  "tone": "rise",
+  "len": "short",
+  "special": null
+ },
+ {
+  "canon": "give",
+  "aliases": [
+   "give",
+   "bring",
+   "fetch",
+   "hand"
+  ],
+  "tone": "rise",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "take",
+  "aliases": [
+   "take",
+   "steal",
+   "borrow",
+   "knock"
+  ],
+  "tone": "rise",
+  "len": "short",
+  "special": null
+ },
+ {
+  "canon": "come",
+  "aliases": [
+   "come",
+   "here",
+   "closer"
+  ],
+  "tone": "rise",
+  "len": "short",
+  "special": null
+ },
+ {
+  "canon": "go",
+  "aliases": [
+   "go",
+   "gone",
+   "leave",
+   "away"
+  ],
+  "tone": "fall",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "sit",
+  "aliases": [
+   "sit",
+   "stay",
+   "down",
+   "wait"
+  ],
+  "tone": "fall",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "up",
+  "aliases": [
+   "up",
+   "jump",
+   "leap",
+   "climb"
+  ],
+  "tone": "rise",
+  "len": "short",
+  "special": null
+ },
+ {
+  "canon": "out",
+  "aliases": [
+   "out",
+   "outside",
+   "exit"
+  ],
+  "tone": "dip",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "inside",
+  "aliases": [
+   "inside",
+   "enter",
+   "indoors"
+  ],
+  "tone": "flat",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "play",
+  "aliases": [
+   "play",
+   "fun",
+   "game",
+   "games",
+   "toy",
+   "toys"
+  ],
+  "tone": "rise",
+  "len": "long",
+  "special": null
+ },
+ {
+  "canon": "pet",
+  "aliases": [
+   "pet",
+   "petting",
+   "cuddle",
+   "cuddles",
+   "snuggle",
+   "rub",
+   "scratch"
+  ],
+  "tone": "arch",
+  "len": "long",
+  "special": null
+ },
+ {
+  "canon": "sleep",
+  "aliases": [
+   "sleep",
+   "sleeping",
+   "nap",
+   "bed",
+   "bedtime",
+   "tired",
+   "sleepy"
+  ],
+  "tone": "fall",
+  "len": "long",
+  "special": null
+ },
+ {
+  "canon": "night",
+  "aliases": [
+   "night",
+   "moon"
+  ],
+  "tone": "fall",
+  "len": "long",
+  "special": null
+ },
+ {
+  "canon": "wake",
+  "aliases": [
+   "wake",
+   "wakeup",
+   "woke",
+   "morning"
+  ],
+  "tone": "rise",
+  "len": "long",
+  "special": null
+ },
+ {
+  "canon": "look",
+  "aliases": [
+   "look",
+   "looks",
+   "watch",
+   "watching",
+   "see",
+   "seeing",
+   "peek"
+  ],
+  "tone": "rise",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "listen",
+  "aliases": [
+   "listen",
+   "hear",
+   "hears",
+   "sound",
+   "noise"
+  ],
+  "tone": "arch",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "run",
+  "aliases": [
+   "run",
+   "running",
+   "chase",
+   "dash",
+   "zoomies"
+  ],
+  "tone": "rise",
+  "len": "long",
+  "special": null
+ },
+ {
+  "canon": "walk",
+  "aliases": [
+   "walk",
+   "walking",
+   "wander",
+   "stroll"
+  ],
+  "tone": "dip",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "loaf",
+  "aliases": [
+   "loaf",
+   "lie",
+   "lay",
+   "laying",
+   "sploot"
+  ],
+  "tone": "flat",
+  "len": "long",
+  "special": null
+ },
+ {
+  "canon": "purr",
+  "aliases": [
+   "purr",
+   "purring",
+   "rumble"
+  ],
+  "tone": "special",
+  "len": "special",
+  "special": "purr"
+ },
+ {
+  "canon": "hiss",
+  "aliases": [
+   "hiss",
+   "hissing",
+   "spit",
+   "spitting",
+   "scream",
+   "yell"
+  ],
+  "tone": "special",
+  "len": "special",
+  "special": "hiss"
+ },
+ {
+  "canon": "bite",
+  "aliases": [
+   "bite",
+   "biting",
+   "chew",
+   "gnaw",
+   "nibble",
+   "kiss"
+  ],
+  "tone": "fall",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "lick",
+  "aliases": [
+   "lick",
+   "licking",
+   "groom",
+   "clean",
+   "wash"
+  ],
+  "tone": "dip",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "scare",
+  "aliases": [
+   "scare",
+   "scared",
+   "afraid",
+   "startle",
+   "flee",
+   "hide"
+  ],
+  "tone": "dip",
+  "len": "long",
+  "special": null
+ },
+ {
+  "canon": "hunt",
+  "aliases": [
+   "hunt",
+   "hunting",
+   "stalk",
+   "pounce",
+   "catch",
+   "caught"
+  ],
+  "tone": "fall",
+  "len": "short",
+  "special": null
+ },
+ {
+  "canon": "chatter",
+  "aliases": [
+   "chatter",
+   "chattering",
+   "chirp",
+   "chirping",
+   "bird",
+   "birds",
+   "mouse",
+   "mice",
+   "bug",
+   "bugs",
+   "insect",
+   "squirrel",
+   "fly",
+   "flies"
+  ],
+  "tone": "flat",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "talk",
+  "aliases": [
+   "talk",
+   "say",
+   "says",
+   "speak",
+   "tell",
+   "ask",
+   "answer"
+  ],
+  "tone": "dip",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "know",
+  "aliases": [
+   "know",
+   "knows",
+   "knew",
+   "understand",
+   "understands"
+  ],
+  "tone": "fall",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "think",
+  "aliases": [
+   "think",
+   "wonder",
+   "guess",
+   "feel",
+   "feels"
+  ],
+  "tone": "flat",
+  "len": "long",
+  "special": null
+ },
+ {
+  "canon": "love",
+  "aliases": [
+   "love",
+   "loves",
+   "adore",
+   "adorable",
+   "like",
+   "likes"
+  ],
+  "tone": "arch",
+  "len": "long",
+  "special": null
+ },
+ {
+  "canon": "hate",
+  "aliases": [
+   "hate",
+   "hates",
+   "dislike",
+   "angry",
+   "mad",
+   "annoyed",
+   "furious",
+   "grumpy"
+  ],
+  "tone": "fall",
+  "len": "long",
+  "special": null
+ },
+ {
+  "canon": "help",
+  "aliases": [
+   "help",
+   "rescue",
+   "save"
+  ],
+  "tone": "rise",
+  "len": "long",
+  "special": null
+ },
+ {
+  "canon": "try",
+  "aliases": [
+   "try",
+   "trying",
+   "attempt"
+  ],
+  "tone": "rise",
+  "len": "long",
+  "special": null
+ },
+ {
+  "canon": "find",
+  "aliases": [
+   "find",
+   "found",
+   "lost",
+   "search",
+   "seeking"
+  ],
+  "tone": "arch",
+  "len": "long",
+  "special": null
+ },
+ {
+  "canon": "keep",
+  "aliases": [
+   "keep",
+   "keeps",
+   "hold",
+   "holding"
+  ],
+  "tone": "flat",
+  "len": "long",
+  "special": null
+ },
+ {
+  "canon": "box",
+  "aliases": [
+   "box",
+   "carton",
+   "basket",
+   "bag"
+  ],
+  "tone": "flat",
+  "len": "long",
+  "special": null
+ },
+ {
+  "canon": "sofa",
+  "aliases": [
+   "sofa",
+   "couch",
+   "lap",
+   "blanket",
+   "pillow",
+   "spot",
+   "cushion",
+   "chair"
+  ],
+  "tone": "flat",
+  "len": "long",
+  "special": null
+ },
+ {
+  "canon": "door",
+  "aliases": [
+   "door",
+   "window",
+   "glass",
+   "gate",
+   "screen"
+  ],
+  "tone": "rise",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "string",
+  "aliases": [
+   "string",
+   "rope",
+   "yarn",
+   "ribbon",
+   "cord",
+   "laser",
+   "feather",
+   "ball"
+  ],
+  "tone": "arch",
+  "len": "long",
+  "special": null
+ },
+ {
+  "canon": "tree",
+  "aliases": [
+   "tree",
+   "trees",
+   "garden",
+   "yard",
+   "bush",
+   "forest"
+  ],
+  "tone": "rise",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "sun",
+  "aliases": [
+   "sun",
+   "sunny",
+   "warm",
+   "heat",
+   "summer",
+   "daylight"
+  ],
+  "tone": "rise",
+  "len": "long",
+  "special": null
+ },
+ {
+  "canon": "cold",
+  "aliases": [
+   "cold",
+   "wet",
+   "rain",
+   "snow",
+   "winter"
+  ],
+  "tone": "dip",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "house",
+  "aliases": [
+   "house",
+   "home",
+   "room",
+   "apartment",
+   "territory"
+  ],
+  "tone": "flat",
+  "len": "long",
+  "special": null
+ },
+ {
+  "canon": "car",
+  "aliases": [
+   "car",
+   "ride",
+   "vet",
+   "bath",
+   "bathroom",
+   "nail",
+   "cage",
+   "carrier"
+  ],
+  "tone": "arch",
+  "len": "long",
+  "special": null
+ },
+ {
+  "canon": "day",
+  "aliases": [
+   "day",
+   "today",
+   "tonight"
+  ],
+  "tone": "dip",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "tomorrow",
+  "aliases": [
+   "tomorrow",
+   "later",
+   "soon",
+   "after"
+  ],
+  "tone": "rise",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "time",
+  "aliases": [
+   "time",
+   "now",
+   "minute",
+   "second"
+  ],
+  "tone": "fall",
+  "len": "short",
+  "special": null
+ },
+ {
+  "canon": "name",
+  "aliases": [
+   "name",
+   "called"
+  ],
+  "tone": "arch",
+  "len": "long",
+  "special": null
+ },
+ {
+  "canon": "thing",
+  "aliases": [
+   "thing",
+   "stuff",
+   "object",
+   "anything",
+   "something"
+  ],
+  "tone": "flat",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "the",
+  "aliases": [
+   "the",
+   "a",
+   "an",
+   "some",
+   "any"
+  ],
+  "tone": "flat",
+  "len": "short",
+  "special": null
+ },
+ {
+  "canon": "and",
+  "aliases": [
+   "and",
+   "also",
+   "plus",
+   "with"
+  ],
+  "tone": "flat",
+  "len": "short",
+  "special": null
+ },
+ {
+  "canon": "or",
+  "aliases": [
+   "or",
+   "either"
+  ],
+  "tone": "flat",
+  "len": "short",
+  "special": null
+ },
+ {
+  "canon": "but",
+  "aliases": [
+   "but",
+   "however",
+   "though"
+  ],
+  "tone": "flat",
+  "len": "short",
+  "special": null
+ },
+ {
+  "canon": "if",
+  "aliases": [
+   "if",
+   "when",
+   "while"
+  ],
+  "tone": "flat",
+  "len": "short",
+  "special": null
+ },
+ {
+  "canon": "to",
+  "aliases": [
+   "to",
+   "for",
+   "from",
+   "toward"
+  ],
+  "tone": "flat",
+  "len": "short",
+  "special": null
+ },
+ {
+  "canon": "of",
+  "aliases": [
+   "of",
+   "than",
+   "as"
+  ],
+  "tone": "flat",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "on",
+  "aliases": [
+   "on",
+   "at",
+   "by",
+   "near"
+  ],
+  "tone": "arch",
+  "len": "short",
+  "special": null
+ },
+ {
+  "canon": "not",
+  "aliases": [
+   "not",
+   "dont",
+   "don't",
+   "cant",
+   "can't",
+   "wont",
+   "won't",
+   "stop",
+   "quit",
+   "enough"
+  ],
+  "tone": "fall",
+  "len": "long",
+  "special": null
+ },
+ {
+  "canon": "is",
+  "aliases": [
+   "is",
+   "are",
+   "am",
+   "was",
+   "were",
+   "be",
+   "been",
+   "being",
+   "do",
+   "does",
+   "did",
+   "can",
+   "could",
+   "will",
+   "would",
+   "should",
+   "may",
+   "might",
+   "must",
+   "have",
+   "has",
+   "had"
+  ],
+  "tone": "flat",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "very",
+  "aliases": [
+   "very",
+   "really",
+   "so",
+   "too",
+   "much",
+   "quite",
+   "such"
+  ],
+  "tone": "flat",
+  "len": "short",
+  "special": null
+ },
+ {
+  "canon": "good",
+  "aliases": [
+   "good",
+   "great",
+   "fine",
+   "ok",
+   "okay",
+   "well",
+   "nice",
+   "happy",
+   "glad",
+   "healthy"
+  ],
+  "tone": "rise",
+  "len": "long",
+  "special": null
+ },
+ {
+  "canon": "bad",
+  "aliases": [
+   "bad",
+   "awful",
+   "terrible",
+   "worst",
+   "naughty",
+   "broken",
+   "wrong"
+  ],
+  "tone": "fall",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "big",
+  "aliases": [
+   "big",
+   "huge",
+   "large",
+   "fat",
+   "wide",
+   "enormous"
+  ],
+  "tone": "arch",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "small",
+  "aliases": [
+   "small",
+   "little",
+   "tiny",
+   "baby",
+   "young",
+   "lil"
+  ],
+  "tone": "arch",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "cute",
+  "aliases": [
+   "cute",
+   "pretty",
+   "beautiful",
+   "lovely",
+   "sweet",
+   "soft",
+   "fluffy"
+  ],
+  "tone": "arch",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "best",
+  "aliases": [
+   "best",
+   "favorite",
+   "beloved",
+   "purrfect"
+  ],
+  "tone": "arch",
+  "len": "long",
+  "special": null
+ },
+ {
+  "canon": "hot",
+  "aliases": [
+   "hot",
+   "hotter",
+   "warmth",
+   "toasty"
+  ],
+  "tone": "rise",
+  "len": "short",
+  "special": null
+ },
+ {
+  "canon": "freezing",
+  "aliases": [
+   "freezing",
+   "chilly",
+   "frozen"
+  ],
+  "tone": "dip",
+  "len": "long",
+  "special": null
+ },
+ {
+  "canon": "quiet",
+  "aliases": [
+   "quiet",
+   "gentle",
+   "calm",
+   "peaceful"
+  ],
+  "tone": "dip",
+  "len": "long",
+  "special": null
+ },
+ {
+  "canon": "loud",
+  "aliases": [
+   "loud",
+   "noisy",
+   "crazy",
+   "wild",
+   "silly",
+   "goofy"
+  ],
+  "tone": "arch",
+  "len": "long",
+  "special": null
+ },
+ {
+  "canon": "boring",
+  "aliases": [
+   "boring",
+   "dull",
+   "slow",
+   "meh"
+  ],
+  "tone": "dip",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "strange",
+  "aliases": [
+   "strange",
+   "weird",
+   "odd",
+   "funny",
+   "confusing"
+  ],
+  "tone": "dip",
+  "len": "normal",
+  "special": null
+ },
+ {
+  "canon": "again",
+  "aliases": [
+   "again",
+   "repeat",
+   "encore"
+  ],
+  "tone": "rise",
+  "len": "short",
+  "special": null
+ },
+ {
+  "canon": "always",
+  "aliases": [
+   "always",
+   "forever",
+   "every",
+   "everyday"
+  ],
+  "tone": "rise",
+  "len": "long",
+  "special": null
+ },
+ {
+  "canon": "hurry",
+  "aliases": [
+   "hurry",
+   "quick",
+   "fast",
+   "emergency"
+  ],
+  "tone": "rise",
+  "len": "long",
+  "special": null
+ }
+]

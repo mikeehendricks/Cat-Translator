@@ -1,0 +1,16 @@
+# runtime state, never committed
+data/
+*.log
+node_modules/
+.npm/
+.cache/
+.arena/
+dist/
+build/
+out/
+target/
+# local overrides
+.env
+local/
+tools/.cache/
+.sudo_as_admin_successful

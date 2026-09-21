@@ -1,0 +1,287 @@
+#!/usr/bin/env node
+'use strict';
+/**
+ * Server-side control tool.
+ *
+ *   sudo meow-translator status
+ *   sudo meow-translator token [--rotate]
+ *   sudo meow-translator update [--check] [--sha <commit>]
+ *   sudo meow-translator versions
+ *   sudo meow-translator rollback [version|sha]
+ *   sudo meow-translator backup [--out FILE]
+ *   sudo meow-translator reset-password [username]
+ *   sudo meow-translator install-service      refresh the systemd unit after an update
+ *   sudo meow-translator setup-https DOMAIN [EMAIL]
+ *   sudo meow-translator logs [-n 50]
+ *   sudo meow-translator geo-probe
+ *
+ * Everything here works on the same files the service uses, so it can be run
+ * while the service is up.
+ */
+const fs = require('node:fs');
+const path = require('node:path');
+const os = require('node:os');
+const { spawnSync } = require('node:child_process');
+const readline = require('node:readline');
+
+const APP_DIR = path.resolve(__dirname, '..');
+const config = require(path.join(APP_DIR, 'server', 'lib', 'config.js'));
+const { Store } = require(path.join(APP_DIR, 'server', 'lib', 'store.js'));
+const auth = require(path.join(APP_DIR, 'server', 'lib', 'auth.js'));
+const { Updater } = require(path.join(APP_DIR, 'server', 'lib', 'updater.js'));
+const { Geo } = require(path.join(APP_DIR, 'server', 'lib', 'geo.js'));
+
+const cfg = config.load(process.argv.slice(2).filter(a => a.startsWith('--config')));
+const store = new Store(cfg.storePath);
+const updater = new Updater(cfg, store, (lvl, msg) => console.log(`  ${lvl}: ${msg}`));
+updater.adoptInstalledTree();
+
+const C = { ok: '\u001b[32m', warn: '\u001b[33m', err: '\u001b[31m', dim: '\u001b[2m', off: '\u001b[0m' };
+const argv = process.argv.slice(2);
+const cmd = argv.find(a => !a.startsWith('-')) || 'status';
+const flag = name => argv.includes(name);
+const opt = (name, dflt) => {
+  const i = argv.indexOf(name);
+  return i >= 0 && argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[i + 1] : dflt;
+};
+
+function sh(cmdline) {
+  const r = spawnSync('bash', ['-lc', cmdline], { encoding: 'utf8' });
+  return { code: r.status, out: (r.stdout || '') + (r.stderr || '') };
+}
+
+function serviceState() {
+  if (!sh('command -v systemctl').out.trim()) return 'no systemd';
+  const active = sh(`systemctl is-active ${opt('--service', 'meow-translator')}`).out.trim();
+  const enabled = sh(`systemctl is-enabled ${opt('--service', 'meow-translator')}`).out.trim();
+  return `${active} (${enabled})`;
+}
+
+function http(pathname) {
+  const r = spawnSync('curl', ['-fsS', '--max-time', '4', `http://${cfg.host}:${cfg.port}${pathname}`], { encoding: 'utf8' });
+  if (r.status !== 0) return null;
+  try { return JSON.parse(r.stdout); } catch (e) { return { raw: r.stdout }; }
+}
+
+function prompt(question, hidden) {
+  return new Promise(resolve => {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: true });
+    if (!hidden) return rl.question(question, a => { rl.close(); resolve(a); });
+    const onData = char => {
+      char = String(char);
+      if (char === '\n' || char === '\r' || char === '\u0004') process.stdout.write('\n');
+      else if (char === '\u0003') process.exit(130);
+      else process.stdout.write(char === '\u007f' ? '' : '*');
+    };
+    process.stdin.on('data', onData);
+    rl.question(question, a => {
+      process.stdin.removeListener('data', onData);
+      rl.close();
+      resolve(a);
+    });
+  });
+}
+
+const commands = {
+  async status() {
+    const health = http('/healthz');
+    console.log(`\n  Meow translator ${C.dim}on this machine${C.off}\n`);
+    console.log(`    installed version   v${store.data.app.version}${store.data.app.sha ? ` (${store.data.app.sha.slice(0, 8)})` : ''}`);
+    console.log(`    version file        ${fs.existsSync(cfg.versionFile) ? fs.readFileSync(cfg.versionFile, 'utf8').trim() : '(missing)'}`);
+    console.log(`    service             ${serviceState()}`);
+    console.log(`    service url         http://${cfg.host}:${cfg.port}/  ${health ? C.ok + 'answering' + C.off : C.warn + 'not answering' + C.off}`);
+    if (health) console.log(`    uptime              ${Math.round(health.uptimeSec / 60)} min`);
+    console.log(`    admin account       ${store.data.admin ? store.data.admin.username + ' (registered)' : C.warn + 'none yet — register at /admin with the setup token' + C.off}`);
+    console.log(`    visits recorded     ${store.data.visits.length}`);
+    console.log(`    data dir            ${cfg.dataDir}`);
+    console.log(`    app dir             ${cfg.appDir}`);
+    console.log(`    config              ${cfg.configPath}`);
+    const check = store.data.updateCheck;
+    if (check && check.remote) {
+      const newer = check.updateAvailable && check.newer;
+      console.log(`    update source       ${store.data.settings.githubRepo}@${store.data.settings.updateChannel} — remote v${check.remote.version} (${check.remote.shortSha}) ${newer ? C.warn + 'newer' + C.off : C.ok + 'up to date' + C.off}`);
+    } else {
+      console.log(`    update source       ${store.data.settings.githubRepo}@${store.data.settings.updateChannel} ${C.dim}(not checked yet)${C.off}`);
+    }
+    console.log('');
+  },
+
+  async token() {
+    if (flag('--rotate')) {
+      const crypto = require('node:crypto');
+      store.data.setup.token = crypto.randomBytes(24).toString('base64url');
+      store.dirty(); store.save();
+      console.log(`\n  New setup token: ${store.data.setup.token}\n`);
+      if (store.data.setup.used) console.log('  Note: registration is already completed, so this token will not be accepted.');
+      console.log('');
+      return;
+    }
+    if (store.data.setup.used) {
+      console.log(`\n  Registration is already complete (admin "${store.data.admin ? store.data.admin.username : '?'}", ${new Date(store.data.setup.usedAt).toLocaleString()}).`);
+      console.log(`  To start over:  sudo meow-translator reset-password\n`);
+      return;
+    }
+    console.log(`\n  One-time setup token: ${store.data.setup.token}`);
+    console.log(`  Use it at http://${cfg.host}:${cfg.port}/admin to create the admin account.\n`);
+  },
+
+  async update() {
+    if (flag('--check')) {
+      const r = await updater.check();
+      if (r.error) { console.error(`  ${C.err}${r.error}${C.off}`); process.exitCode = 1; return; }
+      console.log(`\n  installed  v${r.installed.version}${r.installed.sha ? ` (${r.installed.shortSha})` : ''}`);
+      console.log(`  remote     v${r.remote.version} (${r.remote.shortSha})  ${r.remote.message || ''}`);
+      console.log(`  status     ${r.sameSha ? 'identical commit' : r.newer ? 'a newer version is available' : 'the remote is older or equal'}\n`);
+      return;
+    }
+    const sha = opt('--sha', null);
+    const r = await updater.install({ sha, version: opt('--version', null) });
+    if (!r.changed) { console.log(`\n  ${r.message}\n`); return; }
+    console.log(`\n  ${C.ok}installed v${r.version} (${r.shortSha})${C.off}`);
+    console.log(`  restarting the service …`);
+    if (sh('command -v systemctl').out.trim()) {
+      const out = sh(`systemctl restart ${opt('--service', 'meow-translator')}`);
+      if (out.code !== 0) console.log(`  ${C.warn}restart reported: ${out.out.trim()}${C.off}`);
+    }
+    console.log(`  run "meow-translator status" to confirm.\n`);
+  },
+
+  async versions() {
+    console.log('');
+    for (const h of updater.history()) {
+      console.log(`  ${h.current ? '*' : ' '} v${h.version.padEnd(10)} ${(h.shortSha || '—').padEnd(10)} ${h.restorable ? h.backupDir : C.dim + '(no snapshot)' + C.off}  ${new Date(h.installedAt).toLocaleString()}`);
+    }
+    console.log('');
+  },
+
+  async rollback() {
+    const ref = opt('--to', null);
+    const r = await updater.rollback(ref);
+    console.log(`\n  ${C.ok}rolled back to v${r.version}${r.sha ? ` (${r.sha.slice(0, 8)})` : ''}${C.off}`);
+    if (sh('command -v systemctl').out.trim()) sh(`systemctl restart ${opt('--service', 'meow-translator')}`);
+    console.log('');
+  },
+
+  async backup() {
+    const out = opt('--out', path.join(os.homedir(), `meow-translator-backup-${new Date().toISOString().slice(0, 10)}.tar.gz`));
+    const r = spawnSync('tar', ['-czf', out, '-C', path.dirname(cfg.dataDir), path.basename(cfg.dataDir)], { encoding: 'utf8' });
+    if (r.status !== 0) { console.error(`  backup failed: ${(r.stderr || '').trim()}`); process.exitCode = 1; return; }
+    const size = fs.statSync(out).size;
+    console.log(`\n  ${C.ok}backup written${C.off}  ${out}  (${(size / 1024).toFixed(0)} kB)`);
+    console.log(`  It contains the visit log, credentials, settings and version snapshots.`);
+    console.log(`  Restore with:  sudo systemctl stop meow-translator && sudo tar -xzf ${path.basename(out)} -C ${path.dirname(cfg.dataDir)} && sudo chown -R meow:meow ${cfg.dataDir} && sudo systemctl start meow-translator\n`);
+  },
+
+  async 'reset-password'() {
+    const username = opt('--username', store.data.admin ? store.data.admin.username : 'admin');
+    let password = opt('--password', null);
+    if (!password) {
+      password = await prompt('  New password for ' + username + ': ', true);
+      const again = await prompt('  Repeat it: ', true);
+      if (password !== again) { console.error('  passwords do not match'); process.exitCode = 1; return; }
+    }
+    const problem = auth.passwordProblem(password);
+    if (problem) { console.error('  ' + problem); process.exitCode = 1; return; }
+    store.setAdmin(username, password, auth);
+    store.data.sessions = [];
+    store.save();
+    console.log(`\n  ${C.ok}password reset${C.off} for "${username}" — every session was signed out.`);
+    console.log(`  If no account existed yet, registration is now closed and this credential works at /admin.\n`);
+  },
+
+  async 'install-service'() {
+    const unit = path.join(APP_DIR, 'deploy', 'meow-translator.service');
+    if (!fs.existsSync(unit)) { console.error('  the deployed tree has no deploy/meow-translator.service'); process.exitCode = 1; return; }
+    const user = opt('--user', 'meow');
+    const node = process.execPath;
+    let text = fs.readFileSync(unit, 'utf8')
+      .replace(/^User=.*$/m, `User=${user}`)
+      .replace(/^Group=.*$/m, `Group=${user}`)
+      .replace(/^WorkingDirectory=.*$/m, `WorkingDirectory=${cfg.appDir}`)
+      .replace(/^ExecStart=.*$/m, `ExecStart=${node} ${cfg.appDir}/server/server.js`)
+      .replace(/^ReadWritePaths=.*$/m, `ReadWritePaths=${cfg.appDir} ${cfg.dataDir}`);
+    const target = `/etc/systemd/system/${opt('--service', 'meow-translator')}.service`;
+    const before = fs.existsSync(target) ? fs.readFileSync(target, 'utf8') : '';
+    if (before === text) { console.log('\n  the installed unit already matches the deployed template\n'); return; }
+    fs.writeFileSync(target, text);
+    sh('systemctl daemon-reload');
+    sh(`systemctl restart ${opt('--service', 'meow-translator')}`);
+    console.log(`\n  ${C.ok}service unit refreshed${C.off} from the deployed template and restarted\n`);
+  },
+
+  async 'setup-https'() {
+    const domain = argv.find((a, i) => i > 0 && !a.startsWith('-') && argv[i - 1] === 'setup-https') || opt('--domain', null);
+    const email = opt('--email', null);
+    if (!domain) { console.error('  usage: meow-translator setup-https your.domain.com [--email you@example.com]'); process.exitCode = 1; return; }
+    console.log(`\n  configuring nginx + Let's Encrypt for ${domain}\n`);
+    const conf = `/etc/nginx/sites-available/${opt('--service', 'meow-translator')}`;
+    const body = `server {
+    listen 80;
+    listen [::]:80;
+    server_name ${domain};
+    client_max_body_size 32m;
+    location / {
+        proxy_pass http://${cfg.host}:${cfg.port};
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 120s;
+    }
+}`;
+    fs.writeFileSync(conf, body + '\n');
+    sh(`ln -sf ${conf} /etc/nginx/sites-enabled/${opt('--service', 'meow-translator')}`);
+    console.log(sh('nginx -t && systemctl reload nginx').out.trim());
+    const cb = sh(`certbot --nginx -d ${domain} --non-interactive --agree-tos ${email ? '-m ' + email : ''} --redirect`);
+    console.log(cb.out.trim().split('\n').slice(-6).join('\n'));
+    /* behind a proxy the app must trust X-Forwarded-For to log real visitor IPs */
+    try {
+      const file = JSON.parse(fs.readFileSync(cfg.configPath, 'utf8'));
+      if (!file.trustProxy) {
+        file.trustProxy = true;
+        fs.writeFileSync(cfg.configPath, JSON.stringify(file, null, 2) + '\n');
+        sh(`systemctl restart ${opt('--service', 'meow-translator')}`);
+        console.log(`\n  ${C.ok}trustProxy enabled${C.off} in ${cfg.configPath} and the service restarted,`);
+        console.log(`  so the visit log records the real visitor address instead of 127.0.0.1.\n`);
+      }
+    } catch (e) {
+      console.log(`  ${C.warn}could not set trustProxy automatically: ${e.message}${C.off}`);
+      console.log(`  Set "trustProxy": true in ${cfg.configPath} and restart, or every visit will be logged as 127.0.0.1.\n`);
+    }
+  },
+
+  async logs() {
+    const n = opt('-n', '60');
+    console.log(sh(`journalctl -u ${opt('--service', 'meow-translator')} -n ${n} --no-pager`).out);
+  },
+
+  async 'geo-probe'() {
+    const geo = new Geo(store, cfg, (l, m) => console.log(`  ${l}: ${m}`));
+    const rec = await geo.probe();
+    if (rec) console.log(`\n  ${C.ok}geolocation works${C.off} 8.8.8.8 -> ${rec.city}, ${rec.region}, ${rec.country} (${rec.isp})\n`);
+    else { console.log(`\n  ${C.warn}geolocation failed${C.off} — no provider answered. Outbound HTTPS may be blocked; visit locations will stay unknown.\n`); process.exitCode = 1; }
+  },
+
+  async help() {
+    const text = fs.readFileSync(__filename, 'utf8').split('\n').slice(3, 20).join('\n').replace(/^ \*apex?/gm, '');
+    console.log(text.replace(/^\s*\*?\/?\s?/gm, '').trim());
+  },
+};
+
+(async () => {
+  const fn = commands[cmd];
+  if (!fn) {
+    console.error(`unknown command "${cmd}" — try: meow-translator help`);
+    process.exitCode = 2;
+    return;
+  }
+  try {
+    await fn();
+  } catch (e) {
+    console.error(`  ${C.err}${e.message}${C.off}`);
+    process.exitCode = 1;
+  } finally {
+    store.save();
+  }
+})();

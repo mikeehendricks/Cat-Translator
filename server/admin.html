@@ -1,0 +1,951 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Meow translator · admin</title>
+<style>
+  :root{
+    --bg:#0f0d16; --bg2:#15121f; --panel:#1a1626; --line:#2b2539; --ink:#e9e6f3;
+    --muted:#9d95b5; --amber:#f0a04b; --amber2:#ffc46b; --violet:#9d7bff; --green:#5fd39a;
+    --red:#ff6b81; --blue:#6cb6ff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(1100px 600px at 12% -10%, #241d3d 0%, transparent 60%),
+       radial-gradient(900px 500px at 100% 0%, #1b2a3d 0%, transparent 55%), var(--bg);
+       color:var(--ink);font:15px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;min-height:100vh}
+  a{color:var(--amber)}
+  .wrap{max-width:1180px;margin:0 auto;padding:22px 18px 60px}
+  header.top{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:18px}
+  header.top h1{font-size:20px;margin:0;letter-spacing:.2px}
+  header.top h1 span{color:var(--amber)}
+  .spacer{flex:1}
+  .badge{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:3px 9px;border-radius:999px;
+    border:1px solid var(--line);background:#1d1830;color:var(--muted);white-space:nowrap}
+  .badge.ok{border-color:#2f6b4d;background:#16301f;color:var(--green)}
+  .badge.warn{border-color:#6b5320;background:#312714;color:var(--amber2)}
+  .badge.bad{border-color:#6b2f3b;background:#31161d;color:var(--red)}
+  .badge.violet{border-color:#4a3a7a;background:#221a3a;color:#c9b6ff}
+  .card{background:linear-gradient(180deg,#1b1728,#171325);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px}
+  .card h2{margin:0 0 12px;font-size:15px;letter-spacing:.3px;text-transform:uppercase;color:var(--muted);font-weight:600}
+  .card h3{margin:16px 0 8px;font-size:14px}
+  .grid{display:grid;gap:14px}
+  .g2{grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+  .g4{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+  .stat{background:#1a1626;border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+  .stat b{display:block;font-size:24px;line-height:1.2;color:var(--amber2)}
+  .stat span{font-size:12px;color:var(--muted)}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:7px 9px;border-bottom:1px solid #241f33;vertical-align:top}
+  th{color:var(--muted);font-weight:600;font-size:11.5px;text-transform:uppercase;letter-spacing:.4px;position:sticky;top:0;background:#191527;z-index:1}
+  tr:hover td{background:#1d1930}
+  td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px}
+  .muted{color:var(--muted)}
+  .small{font-size:12.5px}
+  .tiny{font-size:11.5px}
+  button{font:inherit;border-radius:9px;border:1px solid var(--line);background:#241d38;color:var(--ink);
+    padding:8px 13px;cursor:pointer;transition:.15s}
+  button:hover{background:#2c2444;border-color:#3b3355}
+  button.primary{background:linear-gradient(92deg,var(--amber),#ff9f4a);color:#20160a;border:none;font-weight:600}
+  button.primary:hover{filter:brightness(1.07)}
+  button.danger{border-color:#5c2b36;background:#2a161d;color:#ffb3bf}
+  button.danger:hover{background:#3a1c25}
+  button.ghost{background:transparent}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  button.small{padding:5px 10px;font-size:12.5px;border-radius:7px}
+  input,select,textarea{font:inherit;width:100%;background:#100e19;border:1px solid var(--line);color:var(--ink);
+    border-radius:9px;padding:9px 11px}
+  input:focus,select:focus,textarea:focus{outline:2px solid #4a3a7a;outline-offset:0}
+  label{display:block;font-size:12.5px;color:var(--muted);margin:10px 0 4px}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
+  .row>*{flex:1;min-width:140px}
+  .tabs{display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 16px}
+  .tabs button{border-radius:999px;padding:7px 14px;background:#1b1728}
+  .tabs button.active{background:linear-gradient(92deg,#3a2c5e,#4a3a7a);border-color:#6a55a8;color:#fff}
+  .ok{color:var(--green)} .warn{color:var(--amber2)} .bad{color:var(--red)}
+  pre.log{background:#0d0b14;border:1px solid var(--line);border-radius:10px;padding:10px;max-height:280px;overflow:auto;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;white-space:pre-wrap;margin:0}
+  .split{display:grid;grid-template-columns:1.15fr .85fr;gap:14px}
+  @media(max-width:900px){.split{grid-template-columns:1fr}}
+  .bar{height:8px;border-radius:999px;background:#241f33;overflow:hidden}
+  .bar i{display:block;height:100%;background:linear-gradient(90deg,var(--amber),var(--violet))}
+  .hide{display:none!important}
+  .center{min-height:70vh;display:flex;align-items:center;justify-content:center}
+  .auth{width:100%;max-width:420px}
+  .auth h1{font-size:22px;margin:0 0 4px}
+  .auth p{margin:6px 0 0}
+  .pill{font-size:11.5px;padding:2px 7px;border-radius:999px;background:#241f33;color:var(--muted);border:1px solid var(--line)}
+  .tinies{font-size:11.5px;color:var(--muted)}
+  .toast{position:fixed;right:16px;bottom:16px;z-index:50;display:flex;flex-direction:column;gap:8px;align-items:flex-end}
+  .toast div{background:#211a34;border:1px solid var(--line);border-left:3px solid var(--amber);border-radius:10px;
+    padding:10px 13px;font-size:13px;max-width:420px;box-shadow:0 12px 30px #0008}
+  .toast div.err{border-left-color:var(--red)}
+  .toast div.good{border-left-color:var(--green)}
+  .catline{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  details summary{cursor:pointer;color:var(--muted);font-size:12.5px}
+</style>
+</head>
+<body>
+<div id="adminApp">
+
+  <!-- ------------------------------------------------------------- sign in -->
+  <div id="loginView" class="center">
+    <div class="card auth">
+      <div class="catline"><h1>Meow<span style="color:var(--amber)">.</span>admin</h1><span id="loginVersion" class="badge"></span></div>
+      <p class="muted small" id="loginIntro">Loading…</p>
+
+      <form id="registerForm" class="hide" autocomplete="off">
+        <label for="regUser">Choose an admin username</label>
+        <input id="regUser" name="username" autocomplete="username" placeholder="e.g. mike">
+        <label for="regPass">Password (at least 10 characters, letters and numbers)</label>
+        <input id="regPass" name="password" type="password" autocomplete="new-password">
+        <label for="regPass2">Repeat password</label>
+        <input id="regPass2" name="password2" type="password" autocomplete="new-password">
+        <label for="regToken">One-time setup token</label>
+        <input id="regToken" name="setupToken" placeholder="printed by the installer">
+        <p class="tinies">On the server this is:<br><code class="mono">sudo meow-translator token</code></p>
+        <div style="margin-top:14px"><button class="primary" type="submit" style="width:100%">Create the admin account</button></div>
+      </form>
+
+      <form id="loginForm" class="hide" autocomplete="off">
+        <label for="logUser">Username</label>
+        <input id="logUser" name="username" autocomplete="username">
+        <label for="logPass">Password</label>
+        <input id="logPass" name="password" type="password" autocomplete="current-password">
+        <div style="margin-top:14px"><button class="primary" type="submit" style="width:100%">Sign in</button></div>
+      </form>
+
+      <p class="tinies" style="margin-top:14px">Registration can only be completed once; after that this page is a login page.
+        Failed sign-ins are rate limited per IP address.</p>
+    </div>
+  </div>
+
+  <!-- ---------------------------------------------------------------- panel -->
+  <div id="panelView" class="wrap hide">
+    <header class="top">
+      <h1>Meow<span>.</span>admin</h1>
+      <span id="appVersion" class="badge">v—</span>
+      <span id="updateBadge" class="badge warn hide"></span>
+      <span id="whoBadge" class="badge"></span>
+      <div class="spacer"></div>
+      <button id="viewSite" class="small ghost">open the app ↗</button>
+      <button id="logoutBtn" class="small">sign out</button>
+    </header>
+
+    <div class="tabs" id="tabs">
+      <button data-tab="overview" class="active">Overview</button>
+      <button data-tab="visits">Visits</button>
+      <button data-tab="updates">Updates</button>
+      <button data-tab="credentials">Credentials</button>
+      <button data-tab="settings">Settings</button>
+      <button data-tab="audit">Audit log</button>
+    </div>
+
+    <section id="tab-overview"></section>
+    <section id="tab-visits" class="hide"></section>
+    <section id="tab-updates" class="hide"></section>
+    <section id="tab-credentials" class="hide"></section>
+    <section id="tab-settings" class="hide"></section>
+    <section id="tab-audit" class="hide"></section>
+  </div>
+
+  <div class="toast" id="toasts"></div>
+</div>
+
+<script>
+/* ------------------------------------------------------------------ helpers */
+const $ = (sel, root) => (root || document).querySelector(sel);
+const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
+const esc = s => String(s === null || s === undefined ? '' : s)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const S = { csrf: null, username: null, app: null, instanceId: null, overview: null, visits: null, updates: null, settings: null, tab: 'overview', timer: null };
+
+function toast(msg, kind) {
+  const el = document.createElement('div');
+  if (kind) el.className = kind;
+  el.textContent = msg;
+  $('#toasts').appendChild(el);
+  setTimeout(() => el.remove(), kind === 'err' ? 9000 : 4500);
+}
+
+async function api(path, opts) {
+  opts = opts || {};
+  const init = { method: opts.method || 'GET', credentials: 'same-origin', headers: {} };
+  if (opts.body !== undefined) {
+    init.headers['content-type'] = 'application/json';
+    init.body = JSON.stringify(opts.body);
+  }
+  if (init.method !== 'GET' && S.csrf) init.headers['x-meow-csrf'] = S.csrf;
+  const res = await fetch('/api/admin/' + path, init);
+  let data = null;
+  const text = await res.text();
+  try { data = text ? JSON.parse(text) : null; } catch (e) { data = { error: text.slice(0, 200) }; }
+  if (res.status === 401) { showLogin(); throw new Error((data && data.error) || 'signed out'); }
+  if (!res.ok) throw new Error((data && data.error) || ('request failed: ' + res.status));
+  return data;
+}
+
+const fmtTime = t => t ? new Date(t).toLocaleString() : '—';
+const fmtAgo = t => {
+  if (!t) return '—';
+  const s = Math.max(0, Math.round((Date.now() - t) / 1000));
+  if (s < 60) return s + 's ago';
+  if (s < 3600) return Math.round(s / 60) + 'm ago';
+  if (s < 86400) return Math.round(s / 3600) + 'h ago';
+  return Math.round(s / 86400) + 'd ago';
+};
+const fmtBytes = n => {
+  if (!n) return '0 B';
+  const u = ['B', 'kB', 'MB', 'GB'];
+  let i = 0, v = n;
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+  return v.toFixed(v < 10 && i > 0 ? 1 : 0) + ' ' + u[i];
+};
+const fmtDur = sec => {
+  sec = Math.round(sec || 0);
+  const d = Math.floor(sec / 86400), h = Math.floor(sec % 86400 / 3600), m = Math.floor(sec % 3600 / 60);
+  if (d) return d + 'd ' + h + 'h';
+  if (h) return h + 'h ' + m + 'm';
+  if (m) return m + 'm ' + (sec % 60) + 's';
+  return sec + 's';
+};
+
+function sparkline(series, width, height) {
+  if (!series || !series.length) return '';
+  const max = Math.max(1, ...series.map(p => p.hits));
+  const w = width || 640, h = height || 54, pad = 3;
+  const step = series.length > 1 ? (w - pad * 2) / (series.length - 1) : 0;
+  const pts = series.map((p, i) => [pad + i * step, h - pad - (p.hits / max) * (h - pad * 2)]);
+  const line = pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ');
+  const area = line + ` L${pts[pts.length - 1][0].toFixed(1)} ${h - pad} L${pts[0][0].toFixed(1)} ${h - pad} Z`;
+  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" style="width:100%;height:${h}px">
+    <defs><linearGradient id="sg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f0a04b" stop-opacity=".55"/><stop offset="1" stop-color="#9d7bff" stop-opacity=".05"/>
+    </linearGradient></defs>
+    <path d="${area}" fill="url(#sg)"/><path d="${line}" fill="none" stroke="#f0a04b" stroke-width="1.8" stroke-linejoin="round"/>
+  </svg>`;
+}
+
+function bars(list, color) {
+  if (!list || !list.length) return '<p class="muted small">no data yet</p>';
+  const max = Math.max(1, ...list.map(x => x.n));
+  return list.map(x => `<div style="margin-bottom:7px">
+      <div class="small" style="display:flex;justify-content:space-between;gap:10px">
+        <span>${esc(x.key)}</span><span class="muted mono">${x.n}</span></div>
+      <div class="bar"><i style="width:${(100 * x.n / max).toFixed(1)}%${color ? ';background:' + color : ''}"></i></div>
+    </div>`).join('');
+}
+
+/* --------------------------------------------------------------------- auth */
+function showLogin(mode) {
+  $('#panelView').classList.add('hide');
+  $('#loginView').classList.remove('hide');
+  if (S.timer) { clearInterval(S.timer); S.timer = null; }
+  const registered = mode === 'login' || (mode !== 'register' && S.registered);
+  $('#registerForm').classList.toggle('hide', registered);
+  $('#loginForm').classList.toggle('hide', !registered);
+  $('#loginIntro').textContent = registered
+    ? 'Sign in to manage the translator: visits, credentials and updates.'
+    : 'Welcome. There is no admin account yet — create the first one with the one-time setup token.';
+  $('#regUser').focus();
+  $('#logUser').focus();
+}
+
+async function boot() {
+  try {
+    const res = await fetch('/api/version', { credentials: 'same-origin' });
+    const v = await res.json();
+    S.app = v;
+    S.instanceId = v.instanceId;
+    $('#loginVersion').textContent = 'v' + v.version + (v.sha ? ' · ' + String(v.sha).slice(0, 8) : '');
+  } catch (e) { /* offline is fine */ }
+
+  try {
+    const s = await api('session');
+    enterPanel(s);
+  } catch (e) {
+    /* not signed in: decide between register and login */
+    try {
+      const res = await fetch('/api/admin/login', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' }, body: '{}',
+      });
+      const data = await res.json();
+      S.registered = !(res.status === 409 && /register/.test(data.error || ''));
+      showLogin(S.registered ? 'login' : 'register');
+    } catch (err) {
+      S.registered = true;
+      showLogin('login');
+    }
+  }
+}
+
+$('#registerForm').addEventListener('submit', async ev => {
+  ev.preventDefault();
+  const password = $('#regPass').value;
+  if (password !== $('#regPass2').value) return toast('the two passwords do not match', 'err');
+  try {
+    const out = await api('register', {
+      method: 'POST',
+      body: { username: $('#regUser').value, password, setupToken: $('#regToken').value },
+    });
+    S.csrf = out.session.csrf;
+    toast('admin account created', 'good');
+    enterPanel({ session: out.session, admin: { username: $('#regUser').value }, app: S.app });
+  } catch (e) { toast(e.message, 'err'); }
+});
+
+$('#loginForm').addEventListener('submit', async ev => {
+  ev.preventDefault();
+  try {
+    const out = await api('login', { method: 'POST', body: { username: $('#logUser').value, password: $('#logPass').value } });
+    S.csrf = out.session.csrf;
+    enterPanel(out);
+  } catch (e) { toast(e.message, 'err'); }
+});
+
+$('#logoutBtn').addEventListener('click', async () => {
+  try { await api('logout', { method: 'POST' }); } catch (e) {}
+  S.csrf = null;
+  showLogin('login');
+  toast('signed out');
+});
+
+function enterPanel(s) {
+  S.csrf = (s.session && s.session.csrf) || S.csrf;
+  S.username = (s.admin && s.admin.username) || (s.session && s.session.username);
+  $('#loginView').classList.add('hide');
+  $('#panelView').classList.remove('hide');
+  $('#whoBadge').textContent = 'signed in as ' + S.username;
+  if (S.timer) clearInterval(S.timer);
+  S.timer = setInterval(() => { if (S.tab === 'overview' && !document.hidden) loadOverview(true); }, 20000);
+  loadOverview();
+}
+
+/* ------------------------------------------------------------------- tabs */
+$('#tabs').addEventListener('click', ev => {
+  const btn = ev.target.closest('button[data-tab]');
+  if (!btn) return;
+  setTab(btn.dataset.tab);
+});
+
+function setTab(tab) {
+  S.tab = tab;
+  $$('#tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  ['overview', 'visits', 'updates', 'credentials', 'settings', 'audit'].forEach(t =>
+    $('#tab-' + t).classList.toggle('hide', t !== tab));
+  if (tab === 'overview') loadOverview();
+  if (tab === 'visits') loadVisits();
+  if (tab === 'updates') loadUpdates();
+  if (tab === 'credentials') renderCredentials();
+  if (tab === 'settings') loadSettings();
+  if (tab === 'audit') loadAudit();
+}
+
+/* --------------------------------------------------------------- overview */
+async function loadOverview(quiet) {
+  let d;
+  try { d = await api('overview'); } catch (e) { if (!quiet) toast(e.message, 'err'); return; }
+  S.overview = d;
+  S.app = d.app;
+  const s = d.stats, t = s.totals, sv = d.server;
+
+  $('#appVersion').textContent = 'v' + d.app.version + (d.app.sha ? ' · ' + d.app.sha.slice(0, 8) : '');
+  const ub = $('#updateBadge');
+  if (d.updateAvailable && d.latest) {
+    ub.classList.remove('hide');
+    ub.className = 'badge warn';
+    ub.textContent = 'v' + d.latest.version + ' available';
+    ub.onclick = () => setTab('updates');
+    ub.style.cursor = 'pointer';
+  } else if (d.latest) {
+    ub.classList.remove('hide');
+    ub.className = 'badge ok';
+    ub.textContent = 'up to date';
+  } else {
+    ub.classList.add('hide');
+  }
+
+  $('#tab-overview').innerHTML = `
+    <div class="grid g4" style="margin-bottom:14px">
+      <div class="stat"><b>${t.today}</b><span>page views today</span></div>
+      <div class="stat"><b>${t.uniquesToday}</b><span>visitors today</span></div>
+      <div class="stat"><b>${t.inWindow}</b><span>views, last ${s.windowDays} days</span></div>
+      <div class="stat"><b>${t.uniquesInWindow}</b><span>visitors, last ${s.windowDays} days</span></div>
+      <div class="stat"><b>${t.distinctIps}</b><span>distinct IP addresses</span></div>
+      <div class="stat"><b>${t.allTime}</b><span>views all time</span></div>
+    </div>
+
+    <div class="split">
+      <div>
+        <div class="card">
+          <h2>Visits, last ${s.windowDays} days</h2>
+          ${sparkline(s.series)}
+          <div class="small muted" style="display:flex;justify-content:space-between;margin-top:6px">
+            <span>${s.series[0] ? s.series[0].day : ''}</span>
+            <span>peak ${Math.max(0, ...s.series.map(p => p.hits))}/day</span>
+            <span>${s.series[s.series.length - 1] ? s.series[s.series.length - 1].day : ''}</span>
+          </div>
+          <h3>Top countries</h3>${bars(s.countries)}
+          <h3>Top cities</h3>${bars(s.cities, 'linear-gradient(90deg,#6cb6ff,#9d7bff)')}
+        </div>
+
+        <div class="card">
+          <h2>Recent visitors</h2>
+          ${visitsTable(s.recent || [], true)}
+          <div style="margin-top:10px"><button class="small" id="moreVisits">see all visits →</button></div>
+        </div>
+      </div>
+
+      <div>
+        <div class="card">
+          <h2>Application</h2>
+          <table>
+            <tr><td class="muted">Version</td><td><b>v${esc(d.app.version)}</b>${d.app.sha ? ` <span class="pill mono">${esc(d.app.sha.slice(0, 8))}</span>` : ''}</td></tr>
+            <tr><td class="muted">Installed</td><td>${fmtTime(d.app.installedAt)} <span class="tinies">(${fmtAgo(d.app.installedAt)})</span></td></tr>
+            <tr><td class="muted">Installed by</td><td>${esc(d.app.source || '—')}</td></tr>
+            <tr><td class="muted">Latest on GitHub</td><td>${d.latest ? `v${esc(d.latest.version)} <span class="pill mono">${esc(d.latest.shortSha)}</span>` : '<span class="muted">not checked yet</span>'}</td></tr>
+            <tr><td class="muted">Last check</td><td>${d.lastCheck ? fmtAgo(d.lastCheck) : '—'}</td></tr>
+            <tr><td class="muted">Source</td><td class="mono">${esc(d.settings.githubRepo)}@${esc(d.settings.updateChannel)}</td></tr>
+          </table>
+          <div class="row" style="margin-top:12px">
+            <button id="ovCheck" class="small">check for updates</button>
+            <button id="ovUpdates" class="small">update panel</button>
+            <button id="ovRestart" class="small">restart service</button>
+          </div>
+          <p class="tinies">${esc(d.restart.detail)}</p>
+        </div>
+
+        <div class="card">
+          <h2>Server</h2>
+          <table>
+            <tr><td class="muted">Uptime</td><td>${fmtDur(sv.uptimeSec)} <span class="tinies">(started ${fmtTime(sv.startedAt)})</span></td></tr>
+            <tr><td class="muted">Restarts</td><td>${sv.starts}</td></tr>
+            <tr><td class="muted">Node</td><td class="mono">${esc(sv.node)} ${esc(sv.platform)}</td></tr>
+            <tr><td class="muted">Listening</td><td class="mono">${esc(sv.host)}:${sv.port}${sv.trustProxy ? ' <span class="pill">behind proxy</span>' : ''}</td></tr>
+            <tr><td class="muted">Load average</td><td class="mono">${(sv.loadavg || []).join(' · ') || '—'}</td></tr>
+            <tr><td class="muted">Memory (rss)</td><td>${fmtBytes(sv.rssBytes)}</td></tr>
+            <tr><td class="muted">Store file</td><td>${fmtBytes(sv.storeBytes)}</td></tr>
+            <tr><td class="muted">Version backups</td><td>${fmtBytes(sv.versionsDirBytes)}</td></tr>
+            <tr><td class="muted">App directory</td><td class="mono tiny">${esc(sv.appDir)}</td></tr>
+            <tr><td class="muted">Data directory</td><td class="mono tiny">${esc(sv.dataDir)}</td></tr>
+          </table>
+        </div>
+
+        <div class="card">
+          <h2>Sessions</h2>
+          <table>
+            <tr><th>ip</th><th>signed in</th><th>last seen</th></tr>
+            ${d.sessions.map(s => `<tr>
+              <td class="mono tiny">${esc(s.ip || '—')}${s.current ? ' <span class="pill">this one</span>' : ''}</td>
+              <td class="num tiny">${fmtAgo(s.createdAt)}</td>
+              <td class="num tiny">${fmtAgo(s.lastSeen)}</td></tr>`).join('')}
+          </table>
+        </div>
+      </div>
+    </div>`;
+
+  $('#ovCheck').onclick = async () => {
+    const btn = $('#ovCheck');
+    btn.disabled = true; btn.textContent = 'checking…';
+    try {
+      const r = await api('updates/check', { method: 'POST' });
+      if (r.error) toast('check failed: ' + r.error, 'err');
+      else if (r.updateAvailable && r.newer) toast(`v${r.remote.version} is available (${r.remote.shortSha})`, 'good');
+      else if (r.updateAvailable) toast(`the remote has a different build of v${r.remote.version} (${r.remote.shortSha})`);
+      else toast('already running the latest build');
+    } catch (e) { toast(e.message, 'err'); }
+    await loadOverview(true);
+  };
+  $('#ovUpdates').onclick = () => setTab('updates');
+  $('#ovRestart').onclick = async () => {
+    if (!confirm('Restart the service now? Visitors see a second of downtime.')) return;
+    try { await api('restart', { method: 'POST' }); await waitForRestart(d.app.version); }
+    catch (e) { toast(e.message, 'err'); }
+  };
+  const more = $('#moreVisits');
+  if (more) more.onclick = () => setTab('visits');
+}
+
+function visitsTable(rows, compact) {
+  if (!rows || !rows.length) return '<p class="muted small">No visits recorded yet. Open the app in another tab and reload it.</p>';
+  const limit = compact ? 8 : rows.length;
+  return `<table><thead><tr>
+      <th>when</th><th>ip address</th><th>location</th>${compact ? '' : '<th>device</th><th>path</th><th>referrer</th>'}
+      ${compact ? '' : '<th>browser</th>'}
+    </tr></thead><tbody>
+    ${rows.slice(0, limit).map(v => {
+      const g = v.geo || null;
+      const loc = g ? (g.local ? 'Local network' : [g.city, g.region, g.country].filter(Boolean).join(', ')) || '—'
+                    : '<span class="muted tiny">looking up…</span>';
+      return `<tr>
+        <td class="num" title="${esc(fmtTime(v.t))}">${fmtTime(v.t)}<br><span class="tinies">${fmtAgo(v.t)}</span></td>
+        <td class="mono tiny">${esc(v.ip || (v.hash ? 'hidden (' + esc(v.hash.slice(0, 8)) + ')' : '—'))}</td>
+        <td class="small">${loc}${g && g.isp ? `<br><span class="tinies">${esc(g.isp)}</span>` : ''}</td>
+        ${compact ? '' : `<td class="small">${esc(v.device)}</td>
+        <td class="small mono">${esc(v.path)}</td>
+        <td class="small">${esc(v.ref ? (() => { try { return new URL(v.ref).host; } catch (e) { return v.ref; } })() : '(direct)')}</td>
+        <td class="small">${esc(browserName(v.ua))}</td>`}
+      </tr>`;
+    }).join('')}
+  </tbody></table>`;
+}
+
+function browserName(ua) {
+  const s = ua || '';
+  if (/(bot|crawler|spider|curl|wget|python-requests|headless)/i.test(s)) return 'bot';
+  if (/Edg\//.test(s)) return 'Edge';
+  if (/OPR\/|Opera/.test(s)) return 'Opera';
+  if (/Firefox\//.test(s)) return 'Firefox';
+  if (/Chrome\//.test(s)) return 'Chrome';
+  if (/Safari\//.test(s)) return 'Safari';
+  return 'other';
+}
+
+/* ------------------------------------------------------------------- visits */
+async function loadVisits(filter) {
+  const f = filter || S.visitFilter || {};
+  S.visitFilter = f;
+  const qs = new URLSearchParams();
+  if (f.day) qs.set('day', f.day);
+  if (f.country) qs.set('country', f.country);
+  if (f.q) qs.set('q', f.q);
+  if (f.ip) qs.set('ip', f.ip);
+  qs.set('bots', f.bots ? '1' : '0');
+  qs.set('limit', '200');
+  let d;
+  try { d = await api('visits?' + qs.toString()); } catch (e) { return toast(e.message, 'err'); }
+  S.visits = d;
+  const s = d.summary, t = s.totals;
+
+  $('#tab-visits').innerHTML = `
+    <div class="grid g4" style="margin-bottom:14px">
+      <div class="stat"><b>${t.inWindow}</b><span>views, last ${s.windowDays} days</span></div>
+      <div class="stat"><b>${t.uniquesInWindow}</b><span>unique visitors</span></div>
+      <div class="stat"><b>${t.distinctIps}</b><span>distinct IPs</span></div>
+      <div class="stat"><b>${t.today}</b><span>views today</span></div>
+    </div>
+
+    <div class="card">
+      <h2>Filters</h2>
+      <div class="row">
+        <div><label>day</label><input id="fDay" placeholder="YYYY-MM-DD" value="${esc(f.day || '')}"></div>
+        <div><label>country</label><input id="fCountry" placeholder="e.g. Philippines" value="${esc(f.country || '')}"></div>
+        <div><label>search (ip, city, user agent…)</label><input id="fQ" value="${esc(f.q || '')}"></div>
+        <div style="flex:0"><label>bots</label>
+          <select id="fBots"><option value="0"${!f.bots ? ' selected' : ''}>hide</option><option value="1"${f.bots ? ' selected' : ''}>show</option></select></div>
+        <div style="flex:0"><button class="primary" id="fApply">apply</button></div>
+        <div style="flex:0"><button id="fReset">reset</button></div>
+        <div style="flex:0"><button id="fCsv">export CSV</button></div>
+      </div>
+      ${d.privacyMode ? '<p class="tinies warn">Privacy mode is on: addresses are stored as salted hashes, so the IP column is empty. Location was resolved before hashing and is still shown.</p>' : ''}
+    </div>
+
+    <div class="card">
+      <h2>${d.total} visit${d.total === 1 ? '' : 's'}${d.total > d.rows.length ? ` · showing ${d.rows.length}` : ''}</h2>
+      <div style="overflow:auto;max-height:62vh">${visitsTable(d.rows, false)}</div>
+    </div>
+
+    <div class="split">
+      <div class="card"><h2>Top countries</h2>${bars(s.countries)}<h2 style="margin-top:14px">Top cities</h2>${bars(s.cities)}</div>
+      <div>
+        <div class="card"><h2>Devices</h2>${bars(s.devices)}<h2 style="margin-top:14px">Browsers</h2>${bars(s.browsers)}</div>
+        <div class="card"><h2>Referrers</h2>${bars(s.referrers)}<h2 style="margin-top:14px">Most active IPs</h2>${bars(s.topVisitors)}</div>
+        <div class="card">
+          <h2>Danger zone</h2>
+          <p class="small muted">Deleting the visit log cannot be undone. Downloads of the CSV are kept in the audit log.</p>
+          <button class="danger" id="clearVisits">delete all visit data</button>
+        </div>
+      </div>
+    </div>`;
+
+  $('#fApply').onclick = () => loadVisits({
+    day: $('#fDay').value.trim() || undefined,
+    country: $('#fCountry').value.trim() || undefined,
+    q: $('#fQ').value.trim() || undefined,
+    bots: $('#fBots').value === '1',
+  });
+  $('#fReset').onclick = () => loadVisits({});
+  $('#fCsv').onclick = () => {
+    const qs2 = new URLSearchParams(qs); qs2.set('limit', '1000');
+    window.location.href = '/api/admin/visits.csv?' + qs2.toString();
+  };
+  $('#clearVisits').onclick = async () => {
+    if (!confirm('Delete every stored visit? This cannot be undone.')) return;
+    try { await api('visits/clear', { method: 'POST', body: { confirm: 'clear-visits' } }); toast('visit log cleared', 'good'); loadVisits(S.visitFilter); }
+    catch (e) { toast(e.message, 'err'); }
+  };
+}
+
+/* ------------------------------------------------------------------ updates */
+async function loadUpdates() {
+  let d;
+  try { d = await api('updates'); } catch (e) { return toast(e.message, 'err'); }
+  S.updates = d;
+  const c = d.lastCheck;
+  const cur = d.app;
+
+  $('#tab-updates').innerHTML = `
+    <div class="split">
+      <div>
+        <div class="card">
+          <h2>Current version</h2>
+          <div class="catline" style="margin-bottom:10px">
+            <span class="badge violet" style="font-size:15px;padding:6px 12px">v${esc(cur.version)}</span>
+            ${cur.sha ? `<span class="badge mono">${esc(cur.sha.slice(0, 12))}</span>` : ''}
+            <span class="badge">installed ${fmtAgo(cur.installedAt)}</span>
+            <span class="badge">via ${esc(cur.source || '—')}</span>
+          </div>
+          <p class="small muted">Update source: <span class="mono">${esc(d.repo)}@${esc(d.channel)}</span> ·
+            checks run ${d.settings.autoCheckUpdates ? 'every 6 hours' : 'only when you press the button'} ·
+            auto-install is ${d.settings.autoInstallUpdates ? '<b class="warn">on</b>' : 'off'}</p>
+          <div class="row" style="margin-top:10px">
+            <button class="primary" id="upCheck">check for updates</button>
+            <button id="upRestart">restart service</button>
+          </div>
+        </div>
+
+        <div class="card" id="remoteCard"></div>
+
+        <div class="card">
+          <h2>Installed versions &amp; rollback</h2>
+          <table><thead><tr><th>version</th><th>commit</th><th>installed</th><th>kind</th><th>backup</th><th></th></tr></thead><tbody>
+            ${(d.history || []).map((h, i) => `<tr>
+              <td>${h.current ? '<b>v' + esc(h.version) + '</b> <span class="pill">running</span>' : 'v' + esc(h.version)}</td>
+              <td class="mono tiny">${esc(h.shortSha || '—')}</td>
+              <td class="num tiny">${fmtTime(h.installedAt)}</td>
+              <td class="tiny">${esc(h.kind || '')}</td>
+              <td class="tiny">${h.restorable ? fmtBytes(h.sizeBytes) : '<span class="muted">—</span>'}</td>
+              <td>${(!h.current && h.restorable) ? `<button class="small" data-rollback="${esc(h.sha || h.version)}">roll back</button>` : ''}</td>
+            </tr>`).join('') || '<tr><td colspan="6" class="muted small">no history yet</td></tr>'}
+          </tbody></table>
+          <p class="tinies">Before every install the running version is copied into the data directory, so rollback works even
+            after several updates. The six most recent snapshots are kept.</p>
+        </div>
+      </div>
+
+      <div>
+        <div class="card">
+          <h2>Update log</h2>
+          <pre class="log" id="upLog"></pre>
+          <div style="margin-top:10px"><button class="small" id="upLogRefresh">refresh log</button></div>
+        </div>
+        <div class="card">
+          <h2>How an update runs</h2>
+          <ol class="small muted" style="padding-left:18px;margin:0">
+            <li>resolve the branch to a commit and pin that sha</li>
+            <li>download the archive, refuse anything that does not carry the pinned sha</li>
+            <li>unpack into a staging directory — the live tree is untouched</li>
+            <li>run <span class="mono">node server/selftest.js</span> on the staged copy</li>
+            <li>snapshot the running version for rollback</li>
+            <li>swap the files, then restart (${esc(d.restart.mode)} mode)</li>
+          </ol>
+          <p class="tinies">Data and credentials live outside the application directory, so no update or rollback can
+            touch the visit log or your account.</p>
+        </div>
+      </div>
+    </div>`;
+
+  renderRemote(c);
+
+  $('#upCheck').onclick = async () => {
+    const b = $('#upCheck');
+    b.disabled = true; b.textContent = 'checking…';
+    try {
+      const r = await api('updates/check', { method: 'POST' });
+      S.updates.lastCheck = r;
+      renderRemote(r);
+      if (r.error) toast('check failed: ' + r.error, 'err');
+      else toast(r.newer ? `v${r.remote.version} is available` : (r.updateAvailable ? 'the remote build differs from this one' : 'up to date'), 'good');
+    } catch (e) { toast(e.message, 'err'); }
+    b.disabled = false; b.textContent = 'check for updates';
+    loadOverview(true);
+  };
+
+  $$('#tab-updates [data-rollback]').forEach(btn => {
+    btn.onclick = async () => {
+      const ref = btn.dataset.rollback;
+      if (!confirm(`Roll back to ${ref}? The current version is snapshotted first, and the service restarts.`)) return;
+      btn.disabled = true; btn.textContent = 'rolling back…';
+      try {
+        const r = await api('updates/rollback', { method: 'POST', body: { version: ref } });
+        toast(`rolled back to v${r.version}`, 'good');
+        await waitForRestart(r.version);
+      } catch (e) { toast(e.message, 'err'); btn.disabled = false; btn.textContent = 'roll back'; }
+    };
+  });
+
+  $('#upRestart').onclick = async () => {
+    if (!confirm('Restart the service now?')) return;
+    try { await api('restart', { method: 'POST' }); await waitForRestart(cur.version); }
+    catch (e) { toast(e.message, 'err'); }
+  };
+  $('#upLogRefresh').onclick = async () => {
+    const r = await api('updates');
+    $('#upLog').textContent = (r.log || []).map(l => `[${new Date(l.t).toLocaleTimeString()}] ${l.level.toUpperCase()} ${l.message}`).join('\n') || '(empty)';
+  };
+  $('#upLogRefresh').click();
+}
+
+function renderRemote(c) {
+  const box = $('#remoteCard');
+  if (!box) return;
+  if (!c) {
+    box.innerHTML = '<h2>Update source</h2><p class="small muted">Not checked yet — press “check for updates”.</p>';
+    return;
+  }
+  if (c.error) {
+    box.innerHTML = `<h2>Update source</h2><p class="small bad">${esc(c.error)}</p>
+      <p class="tinies muted">If the repository is private, add a token in Settings.</p>`;
+    return;
+  }
+  const r = c.remote || {};
+  const same = c.sameSha;
+  const newer = c.newer;
+  const publish = c.publish;
+  const headline = same ? '<span class="badge ok">this exact commit is running</span>'
+    : newer ? `<span class="badge warn">update available</span>`
+    : publish ? '<span class="badge warn">the remote republished this version</span>'
+    : `<span class="badge">the remote is older than what is installed</span>`;
+  box.innerHTML = `
+    <h2>Update source · ${esc(c.repo)}@${esc(c.branch)}</h2>
+    <div class="catline" style="margin-bottom:8px">
+      <span class="badge violet" style="font-size:15px;padding:6px 12px">v${esc(r.version)}</span>
+      <span class="badge mono">${esc(r.shortSha || '')}</span>
+      ${headline}
+    </div>
+    <table>
+      <tr><td class="muted">commit</td><td class="mono tiny">${esc(r.sha || '')}</td></tr>
+      <tr><td class="muted">message</td><td class="small">${esc(r.message || '—')}</td></tr>
+      <tr><td class="muted">committed</td><td>${fmtTime(r.date ? Date.parse(r.date) : null)}</td></tr>
+      <tr><td class="muted">checked</td><td>${fmtAgo(c.checkedAt)}</td></tr>
+    </table>
+    <div class="row" style="margin-top:12px">
+      ${(newer || publish) ? `<button class="primary" id="upInstall">install v${esc(r.version)}</button>` : ''}
+      ${r.url ? `<button class="ghost" onclick="window.open('${esc(r.url)}','_blank')">view commit ↗</button>` : ''}
+    </div>
+    ${(newer || publish) ? '<p class="tinies">The staged copy is smoke-tested before anything is replaced, and the current version is snapshotted for rollback.</p>'
+      : '<p class="tinies muted">Installing the same version again is possible from the history below if you need to redeploy.</p>'}`;
+
+  const inst = $('#upInstall');
+  if (inst) inst.onclick = async () => {
+    if (!confirm(`Install v${r.version} (${r.shortSha}) and restart?`)) return;
+    inst.disabled = true;
+    inst.textContent = 'installing…';
+    try {
+      const out = await api('updates/install', { method: 'POST', body: { sha: r.sha, version: r.version } });
+      if (!out.changed) { toast(out.message || 'nothing to do'); loadUpdates(); return; }
+      toast(`installed v${out.version} in ${out.elapsedMs} ms`, 'good');
+      await waitForRestart(out.version);
+    } catch (e) {
+      toast('install failed: ' + e.message, 'err');
+      inst.disabled = false;
+      inst.textContent = 'install v' + r.version;
+      loadUpdates();
+    }
+  };
+}
+
+async function waitForRestart(expectVersion) {
+  toast('the service is restarting…');
+  const started = Date.now();
+  /* The process that is on its way out keeps answering for another second or
+     two, and a fresh process reports an uptime of 0 — so identity, not time, is
+     what tells us the new one is up. */
+  while (Date.now() - started < 90000) {
+    await new Promise(r => setTimeout(r, 1000));
+    try {
+      const res = await fetch('/api/health', { cache: 'no-store', credentials: 'same-origin' });
+      if (!res.ok) continue;
+      const h = await res.json();
+      const fresh = S.instanceId ? h.instanceId && h.instanceId !== S.instanceId
+                                 : h.uptimeSec < (Date.now() - started) / 1000 + 5;
+      if (fresh) {
+        toast(`back online · running v${h.version}`, 'good');
+        setTimeout(() => location.reload(), 900);
+        return;
+      }
+    } catch (e) { /* still down, keep waiting */ }
+  }
+  toast('the service did not come back within 90s — check "systemctl status meow-translator"', 'err');
+}
+
+/* -------------------------------------------------------------- credentials */
+function renderCredentials() {
+  const me = S.overview && S.overview.sessions ? S.overview.sessions : [];
+  $('#tab-credentials').innerHTML = `
+    <div class="split">
+      <div class="card">
+        <h2>Change credentials</h2>
+        <p class="small muted">Your current password is required. Changing either value signs out every other session.</p>
+        <form id="credForm" autocomplete="off">
+          <label for="cUser">Username</label>
+          <input id="cUser" value="${esc(S.username || '')}" autocomplete="username">
+          <label for="cCur">Current password</label>
+          <input id="cCur" type="password" autocomplete="current-password">
+          <label for="cNew">New password <span class="tinies">(leave empty to change only the username)</span></label>
+          <input id="cNew" type="password" autocomplete="new-password">
+          <label for="cNew2">Repeat new password</label>
+          <input id="cNew2" type="password" autocomplete="new-password">
+          <div class="row" style="margin-top:14px">
+            <button class="primary" type="submit">save changes</button>
+            <button type="button" id="signOutAll">sign out all sessions</button>
+          </div>
+        </form>
+      </div>
+      <div class="card">
+        <h2>Account</h2>
+        <table>
+          <tr><td class="muted">Username</td><td>${esc(S.username || '—')}</td></tr>
+          <tr><td class="muted">Account created</td><td>${S.overview && S.overview.sessions ? '' : ''}${fmtTime(window.__createdAt || null)}</td></tr>
+          <tr><td class="muted">Password hashing</td><td class="mono tiny">scrypt (N=16384, r=8, p=1)</td></tr>
+          <tr><td class="muted">Session lifetime</td><td>12 hours, sliding</td></tr>
+        </table>
+        <p class="tinies">Registration is closed permanently once an account exists. If you lose the password, reset it on the
+          server with <span class="mono">sudo meow-translator reset-password</span>.</p>
+      </div>
+    </div>`;
+
+  $('#credForm').onsubmit = async ev => {
+    ev.preventDefault();
+    const np = $('#cNew').value;
+    if (np && np !== $('#cNew2').value) return toast('the two new passwords do not match', 'err');
+    try {
+      const out = await api('credentials', {
+        method: 'POST',
+        body: { username: $('#cUser').value, currentPassword: $('#cCur').value, newPassword: np || undefined },
+      });
+      S.username = out.username;
+      $('#whoBadge').textContent = 'signed in as ' + out.username;
+      toast('updated ' + out.changed.join(' and '), 'good');
+      loadOverview(true);
+    } catch (e) { toast(e.message, 'err'); }
+  };
+  $('#signOutAll').onclick = async () => {
+    if (!confirm('Sign out every session, including this one?')) return;
+    try { await api('logout-all', { method: 'POST' }); showLogin('login'); } catch (e) { toast(e.message, 'err'); }
+  };
+  api('session').then(s => {
+    window.__createdAt = s.admin.createdAt;
+    setTab('credentials');
+  }).catch(() => {});
+}
+
+/* ----------------------------------------------------------------- settings */
+async function loadSettings() {
+  let d;
+  try { d = await api('overview'); } catch (e) { return toast(e.message, 'err'); }
+  const s = d.settings;
+  S.settings = s;
+  $('#tab-settings').innerHTML = `
+    <div class="split">
+      <div class="card">
+        <h2>Visits &amp; privacy</h2>
+        <form id="setForm" autocomplete="off">
+          <label>Visitor IP addresses</label>
+          <select id="sRawIp">
+            <option value="1"${s.storeRawIp ? ' selected' : ''}>store the address (shows the IP column)</option>
+            <option value="0"${!s.storeRawIp ? ' selected' : ''}>store a salted hash only (privacy mode)</option>
+          </select>
+          <label>Location lookups</label>
+          <select id="sGeo">
+            <option value="1"${s.geoLookup ? ' selected' : ''}>on — resolve country/city from a public IP service</option>
+            <option value="0"${!s.geoLookup ? ' selected' : ''}>off — keep every address on this server</option>
+          </select>
+          <label for="sRetention">Keep visits for (days)</label>
+          <input id="sRetention" type="number" min="1" max="3650" value="${s.retentionDays}">
+
+          <h3>Updates</h3>
+          <label>Automatic checks</label>
+          <select id="sAutoCheck">
+            <option value="1"${s.autoCheckUpdates ? ' selected' : ''}>every 6 hours</option>
+            <option value="0"${!s.autoCheckUpdates ? ' selected' : ''}>never (manual only)</option>
+          </select>
+          <label>Automatic install</label>
+          <select id="sAutoInstall">
+            <option value="0"${!s.autoInstallUpdates ? ' selected' : ''}>off — I will press install</option>
+            <option value="1"${s.autoInstallUpdates ? ' selected' : ''}>on — install new versions automatically</option>
+          </select>
+          <label for="sRepo">GitHub repository (owner/name)</label>
+          <input id="sRepo" value="${esc(s.githubRepo)}">
+          <label for="sChannel">Branch to follow</label>
+          <input id="sChannel" value="${esc(s.updateChannel)}">
+          <label for="sToken">GitHub token <span class="tinies">(only needed for a private fork; leave blank otherwise)</span></label>
+          <input id="sToken" type="password" placeholder="${s.githubToken ? '*** (set)' : 'not set'}">
+
+          <div class="row" style="margin-top:14px"><button class="primary" type="submit">save settings</button></div>
+        </form>
+      </div>
+      <div class="card">
+        <h2>What these do</h2>
+        <p class="small muted"><b>Privacy mode</b> keeps the statistics useful (unique visitors, returning visitors, daily
+          counts) while storing no address: the IP is replaced by a salted SHA-256 hash of address + user agent.</p>
+        <p class="small muted"><b>Location lookups</b> send the visitor's address to a public service (ipwho.is, falling back to
+          ip-api.com) and cache the answer for a month. Turn it off if the server must not talk to anyone.</p>
+        <p class="small muted"><b>Automatic install</b> is off by default on purpose. When it is on, a newer version in the
+          repository is installed and the service restarts within minutes — the staged copy is still smoke-tested first,
+          and the previous version is snapshotted for rollback.</p>
+        <p class="small muted"><b>Token</b> is only for private forks or when GitHub's unauthenticated rate limit gets in the
+          way. It is stored in the store file on the server (mode 600) and never sent to the browser.</p>
+        <div class="card" style="margin-top:14px;background:#191527">
+          <h2>Maintenance</h2>
+          <p class="small muted">On the server:</p>
+          <pre class="log">systemctl status meow-translator
+journalctl -u meow-translator -f
+sudo meow-translator update      # update from the command line
+sudo meow-translator rollback    # roll back one version
+sudo meow-translator token       # re-print the one-time setup token
+sudo meow-translator backup      # snapshot the data directory</pre>
+        </div>
+      </div>
+    </div>`;
+
+  $('#setForm').onsubmit = async ev => {
+    ev.preventDefault();
+    try {
+      const out = await api('settings', {
+        method: 'POST',
+        body: {
+          storeRawIp: $('#sRawIp').value === '1',
+          geoLookup: $('#sGeo').value === '1',
+          retentionDays: Number($('#sRetention').value),
+          autoCheckUpdates: $('#sAutoCheck').value === '1',
+          autoInstallUpdates: $('#sAutoInstall').value === '1',
+          githubRepo: $('#sRepo').value,
+          updateChannel: $('#sChannel').value,
+          githubToken: $('#sToken').value || undefined,
+        },
+      });
+      S.settings = out.settings;
+      toast('settings saved', 'good');
+      loadSettings();
+    } catch (e) { toast(e.message, 'err'); }
+  };
+}
+
+/* --------------------------------------------------------------------- audit */
+async function loadAudit() {
+  let d;
+  try { d = await api('audit'); } catch (e) { return toast(e.message, 'err'); }
+  $('#tab-audit').innerHTML = `
+    <div class="card">
+      <h2>Admin activity</h2>
+      <table><thead><tr><th>when</th><th>who</th><th>action</th><th>detail</th><th>ip</th></tr></thead><tbody>
+        ${(d.rows || []).map(r => `<tr>
+          <td class="num tiny">${fmtTime(r.t)}</td>
+          <td class="small">${esc(r.who)}</td>
+          <td class="small"><span class="pill">${esc(r.action)}</span></td>
+          <td class="small">${esc(r.detail)}</td>
+          <td class="mono tiny">${esc(r.ip)}</td></tr>`).join('') || '<tr><td colspan="5" class="muted small">nothing yet</td></tr>'}
+      </tbody></table>
+    </div>`;
+}
+
+/* -------------------------------------------------------------------- start */
+$('#viewSite').onclick = () => window.open('/', '_blank');
+boot();
+</script>
+</body>
+</html>

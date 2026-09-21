@@ -1,0 +1,710 @@
+#!/usr/bin/env node
+'use strict';
+/**
+ * Meow translator server.
+ *
+ * Zero npm dependencies: everything below is Node's standard library, so the
+ * installer never has to reach npm and an update can never break on a missing
+ * package. What it serves:
+ *
+ *   /            the single-file translator app (cat-translator.html)
+ *   /audio/*.wav  sample meows rendered by the synthesiser
+ *   /admin       the admin panel (one-time registration, then login)
+ *   /api/*       the public version endpoint and the admin API
+ *
+ * Visit statistics record page views of the app only — admin traffic and static
+ * assets are excluded, so the numbers mean "people using the translator".
+ */
+const http = require('node:http');
+const fs = require('node:fs');
+const path = require('node:path');
+const url = require('node:url');
+const crypto = require('node:crypto');
+
+const config = require('./lib/config');
+const { Store } = require('./lib/store');
+const auth = require('./lib/auth');
+const { Geo, normaliseIp, isPrivateIp } = require('./lib/geo');
+const stats = require('./lib/stats');
+const restart = require('./lib/restart');
+const { Updater, sha8, dirSize } = require('./lib/updater');
+
+const cfg = config.load();
+const store = new Store(cfg.storePath);
+const updater = new Updater(cfg, store);
+const geo = new Geo(store, cfg, (level, msg) => { log(level, msg); });
+
+const STARTED = Date.now();
+/* Identifies THIS process. The admin panel and the test suite use it to tell a
+   restarted service apart from the one that was about to exit. */
+const INSTANCE = crypto.randomBytes(8).toString('hex');
+updater.adoptInstalledTree();     // trust the VERSION file over the stored record
+
+function log(level, msg) {
+  const line = `[${new Date().toISOString()}] ${level.toUpperCase()} ${msg}`;
+  if (level === 'error') console.error(line); else console.log(line);
+}
+
+/* ------------------------------------------------------------------ plumbing */
+
+function clientIp(req) {
+  if (cfg.trustProxy) {
+    const xff = req.headers['x-forwarded-for'];
+    if (xff) {
+      /* the LAST hop is the one our proxy appended; earlier entries are client
+         supplied and must not be trusted */
+      const parts = String(xff).split(',').map(s => s.trim()).filter(Boolean);
+      if (parts.length) return { ip: normaliseIp(parts[parts.length - 1]), proxied: true };
+    }
+    const real = req.headers['x-real-ip'];
+    if (real) return { ip: normaliseIp(real), proxied: true };
+  }
+  return { ip: normaliseIp(req.socket.remoteAddress || ''), proxied: false };
+}
+
+function send(res, status, body, headers) {
+  const h = Object.assign({
+    'cache-control': 'no-store',
+    'x-content-type-options': 'nosniff',
+    'referrer-policy': 'same-origin',
+  }, headers || {});
+  if (typeof body === 'string' || Buffer.isBuffer(body)) {
+    if (!h['content-type']) h['content-type'] = 'text/plain; charset=utf-8';
+    h['content-length'] = Buffer.byteLength(body);
+  }
+  res.writeHead(status, h);
+  if (body === null || body === undefined) res.end();
+  else res.end(body);
+}
+
+function json(res, status, obj, headers) {
+  send(res, status, JSON.stringify(obj), Object.assign({ 'content-type': 'application/json; charset=utf-8' }, headers || {}));
+}
+
+async function readJson(req) {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    const chunks = [];
+    req.on('data', c => {
+      size += c.length;
+      if (size > 256 * 1024) { reject(new Error('body too large')); req.destroy(); return; }
+      chunks.push(c);
+    });
+    req.on('end', () => {
+      if (!chunks.length) return resolve({});
+      try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); }
+      catch (e) { reject(new Error('invalid JSON body')); }
+    });
+    req.on('error', reject);
+  });
+}
+
+/* very small in-memory rate limiter, per IP, for the API routes */
+const buckets = new Map();
+function rateLimit(key, limit, windowMs) {
+  const now = Date.now();
+  const b = buckets.get(key);
+  if (!b || now > b.reset) { buckets.set(key, { n: 1, reset: now + windowMs }); return true; }
+  b.n += 1;
+  return b.n <= limit;
+}
+
+function serveFile(res, file, type, extraHeaders) {
+  fs.readFile(file, (err, buf) => {
+    if (err) return send(res, 404, 'not found\n');
+    send(res, 200, buf, Object.assign({
+      'content-type': type,
+      'cache-control': file.endsWith('.html') ? 'no-store' : 'public, max-age=300',
+    }, extraHeaders || {}));
+  });
+}
+
+const TYPES = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.wav': 'audio/wav',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.ico': 'image/x-icon',
+  '.txt': 'text/plain; charset=utf-8',
+};
+
+const FAVICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#16121f"/><path d="M14 44V26l7 7c6-5 16-5 22 0l7-7v18c0 4-3 6-7 6H21c-4 0-7-2-7-6z" fill="#f0a04b"/><circle cx="25" cy="35" r="3" fill="#16121f"/><circle cx="39" cy="35" r="3" fill="#16121f"/><circle cx="32" cy="42" r="2.5" fill="#16121f"/></svg>`;
+
+/* --------------------------------------------------------------- admin state */
+
+function currentSession(req) {
+  return auth.sessionFromRequest(store, req);
+}
+
+function requireSession(req, res) {
+  const sess = currentSession(req);
+  if (!sess) { json(res, 401, { error: 'not signed in' }); return null; }
+  if (req.method !== 'GET' && !auth.csrfOk(req, sess)) {
+    json(res, 403, { error: 'missing or bad CSRF token — reload the admin page' });
+    return null;
+  }
+  /* same-origin gate: an admin change must come from the admin page itself */
+  const origin = req.headers.origin;
+  if (req.method !== 'GET' && origin) {
+    const host = req.headers.host;
+    let ok = false;
+    try { ok = new URL(origin).host === host; } catch (e) { ok = false; }
+    if (!ok) { json(res, 403, { error: 'cross-origin admin request refused' }); return null; }
+  }
+  return sess;
+}
+
+function sessionPayload(sess) {
+  return {
+    username: store.data.admin ? store.data.admin.username : null,
+    csrf: sess.csrf,
+    createdAt: sess.createdAt,
+    expiresAt: sess.expiresAt,
+    ip: sess.ip,
+    started: STARTED,
+  };
+}
+
+/* ------------------------------------------------------------- visit capture */
+
+function trackVisit(req, res, ipInfo) {
+  const entry = stats.record(store, {
+    ip: ipInfo.ip,
+    path: '/',
+    ua: req.headers['user-agent'],
+    ref: req.headers.referer || req.headers.referrer || '',
+    proxied: ipInfo.proxied,
+  });
+  const cached = geo.cached(ipInfo.ip);
+  if (cached) stats.attachGeo(store, entry, cached);
+  else if (store.data.settings.geoLookup) {
+    geo.lookup(ipInfo.ip).then(g => { if (g) stats.attachGeo(store, entry, g); }).catch(() => {});
+  }
+}
+
+/* ------------------------------------------------------------------- routing */
+
+async function handler(req, res) {
+  const parsed = url.parse(req.url, true);
+  const pathname = decodeURIComponent(parsed.pathname || '/');
+  const ipInfo = clientIp(req);
+
+  if (cfg.logRequests) log('info', `${req.method} ${pathname} ${ipInfo.ip}`);
+
+  try {
+    /* ---------------------------------------------------------------- public */
+    if (req.method === 'GET' && (pathname === '/healthz' || pathname === '/api/health')) {
+      return json(res, 200, {
+        ok: true,
+        version: store.data.app.version,
+        uptimeSec: Math.round((Date.now() - STARTED) / 1000),
+        instanceId: INSTANCE,
+        startedAt: STARTED,
+      });
+    }
+
+    if (req.method === 'GET' && pathname === '/favicon.ico') {
+      return send(res, 200, FAVICON, { 'content-type': 'image/svg+xml', 'cache-control': 'public, max-age=86400' });
+    }
+
+    if (req.method === 'GET' && pathname === '/api/version') {
+      const check = store.data.updateCheck;
+      return json(res, 200, {
+        version: store.data.app.version,
+        instanceId: INSTANCE,
+        sha: store.data.app.sha,
+        shortSha: sha8(store.data.app.sha),
+        installedAt: store.data.app.installedAt,
+        source: store.data.app.source,
+        latest: check && check.remote ? { version: check.remote.version, shortSha: check.remote.shortSha, url: check.remote.url } : null,
+        updateAvailable: !!(check && check.remote && check.updateAvailable && check.newer),
+        checkedAt: check ? check.checkedAt : null,
+        repo: store.data.settings.githubRepo,
+      });
+    }
+
+    if (req.method === 'GET' && (pathname === '/' || pathname === '/index.html' || pathname === '/app')) {
+      trackVisit(req, res, ipInfo);
+      return serveFile(res, cfg.appHtml, TYPES['.html'], {
+        'cache-control': 'no-cache',
+        /* The app is a self-contained page: it needs inline script/style, blob:
+           audio for playback/download, and no network at all. Framing is left
+           open so it can sit behind a reverse proxy or a preview pane; set
+           cfg.strictFrames to lock that down. */
+        'content-security-policy': [
+          "default-src 'self'",
+          "script-src 'self' 'unsafe-inline'",
+          "style-src 'self' 'unsafe-inline'",
+          "img-src 'self' data: blob:",
+          "media-src 'self' blob: data:",
+          "connect-src 'self'",
+          "form-action 'none'",
+          "base-uri 'none'",
+          cfg.strictFrames ? "frame-ancestors 'none'" : "frame-ancestors *",
+        ].join('; '),
+      });
+    }
+
+    if (req.method === 'GET' && pathname.startsWith('/audio/')) {
+      const rel = pathname.replace(/^\/+/, '');
+      const full = path.join(cfg.appDir, rel);
+      if (!full.startsWith(path.join(cfg.appDir, 'audio'))) return send(res, 403, 'forbidden\n');
+      return serveFile(res, full, TYPES[path.extname(full)] || 'application/octet-stream', { 'cache-control': 'public, max-age=3600' });
+    }
+
+    /* ----------------------------------------------------------------- admin */
+    if (req.method === 'GET' && (pathname === '/admin' || pathname === '/admin/')) {
+      return serveFile(res, path.join(__dirname, 'admin.html'), TYPES['.html'], {
+        'content-security-policy': [
+          "default-src 'self'",
+          "script-src 'self' 'unsafe-inline'",
+          "style-src 'self' 'unsafe-inline'",
+          "img-src 'self' data:",
+          "connect-src 'self'",
+          "form-action 'none'",
+          "base-uri 'none'",
+          cfg.strictFrames ? "frame-ancestors 'none'" : "frame-ancestors *",
+        ].join('; '),
+      });
+    }
+    if (req.method === 'GET' && pathname.startsWith('/admin/')) {
+      return send(res, 302, null, { location: '/admin' });
+    }
+
+    if (pathname.startsWith('/api/admin/')) {
+      if (!rateLimit(`api:${ipInfo.ip}`, 240, 60000)) return json(res, 429, { error: 'too many requests' });
+      return await adminApi(req, res, pathname.slice('/api/admin/'.length), ipInfo);
+    }
+
+    return send(res, 404, 'not found\n', { 'content-type': 'text/plain; charset=utf-8' });
+  } catch (e) {
+    log('error', `${req.method} ${pathname}: ${e && e.stack ? e.stack.split('\n')[0] : e}`);
+    if (!res.headersSent) json(res, 500, { error: String((e && e.message) || e) });
+  }
+}
+
+/* ----------------------------------------------------------------- admin API */
+
+async function adminApi(req, res, route, ipInfo) {
+  const method = req.method;
+  const registered = !!store.data.admin;
+
+  /* -- one-time registration ------------------------------------------------ */
+  if (method === 'POST' && route === 'register') {
+    if (registered) return json(res, 409, { error: 'an admin account already exists — registration is closed' });
+    if (!rateLimit(`reg:${ipInfo.ip}`, 8, 60000)) return json(res, 429, { error: 'too many attempts' });
+    const body = await readJson(req);
+    const token = String(body.setupToken || '').trim();
+    if (!token) return json(res, 400, { error: 'the setup token is required' });
+    const expected = store.data.setup.token || '';
+    const a = Buffer.from(token), b = Buffer.from(expected);
+    if (!expected || a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+      store.audit('unknown', 'register-rejected', 'bad setup token', ipInfo.ip);
+      return json(res, 403, { error: 'that setup token is not valid' });
+    }
+    const username = String(body.username || '').trim();
+    if (!/^[a-zA-Z0-9._-]{3,32}$/.test(username)) {
+      return json(res, 400, { error: 'username must be 3-32 characters (letters, digits, . _ -)' });
+    }
+    const pwProblem = auth.passwordProblem(String(body.password || ''));
+    if (pwProblem) return json(res, 400, { error: pwProblem });
+
+    store.setAdmin(username, String(body.password), auth);       // setAdmin flushes
+    store.audit(username, 'register', `account created from ${ipInfo.ip}`, ipInfo.ip);
+    store.save();
+    const sess = auth.createSession(store, { clientIp: ipInfo.ip, headers: req.headers }, cfg.sessionHours);
+    log('info', `admin account "${username}" registered`);
+    return json(res, 200, { ok: true, session: sessionPayload(sess) }, {
+      'set-cookie': auth.cookieHeader(sess.id, { secure: isSecure(req), maxAgeSec: cfg.sessionHours * 3600 }),
+    });
+  }
+
+  /* -- login ---------------------------------------------------------------- */
+  if (method === 'POST' && route === 'login') {
+    if (!registered) return json(res, 409, { error: 'no admin account yet — register first' });
+    const locked = auth.lockedFor(store, ipInfo.ip);
+    if (locked > 0) {
+      return json(res, 429, { error: `too many failed attempts — try again in ${Math.ceil(locked / 60000)} min` });
+    }
+    const body = await readJson(req);
+    const username = String(body.username || '').trim();
+    const password = String(body.password || '');
+    const admin = store.data.admin;
+    const okUser = username.toLowerCase() === String(admin.username).toLowerCase();
+    const okPass = auth.verifyPassword(password, admin);
+    if (!okUser || !okPass) {
+      auth.noteFailure(store, ipInfo.ip);
+      store.audit(username || 'unknown', 'login-failed', ipInfo.ip, ipInfo.ip);
+      return json(res, 401, { error: 'wrong username or password' });
+    }
+    auth.clearFailures(store, ipInfo.ip);
+    const sess = auth.createSession(store, { clientIp: ipInfo.ip, headers: req.headers }, cfg.sessionHours);
+    store.audit(username, 'login', '', ipInfo.ip);
+    return json(res, 200, { ok: true, session: sessionPayload(sess) }, {
+      'set-cookie': auth.cookieHeader(sess.id, { secure: isSecure(req), maxAgeSec: cfg.sessionHours * 3600 }),
+    });
+  }
+
+  /* -- everything below needs a session ------------------------------------- */
+  const sess = requireSession(req, res);
+  if (!sess) return;
+
+  if (method === 'GET' && route === 'session') {
+    return json(res, 200, {
+      session: sessionPayload(sess),
+      admin: { username: store.data.admin.username, createdAt: store.data.admin.createdAt, updatedAt: store.data.admin.updatedAt },
+      app: updater.installed(),
+      restart: restart.describe(cfg),
+    });
+  }
+
+  if (method === 'POST' && route === 'logout') {
+    auth.dropSession(store, sess.id);
+    store.audit(store.data.admin.username, 'logout', '', ipInfo.ip);
+    return json(res, 200, { ok: true }, { 'set-cookie': auth.cookieHeader('', { clear: true }) });
+  }
+
+  if (method === 'POST' && route === 'logout-all') {
+    const n = store.data.sessions.length;
+    store.data.sessions = [];
+    store.audit(store.data.admin.username, 'logout-all', `${n} session(s) dropped`, ipInfo.ip);
+    store.save();
+    return json(res, 200, { ok: true, dropped: n }, { 'set-cookie': auth.cookieHeader('', { clear: true }) });
+  }
+
+  /* -- overview ------------------------------------------------------------- */
+  if (method === 'GET' && route === 'overview') {
+    const summary = stats.summarize(store, { days: 30 });
+    const mem = process.memoryUsage();
+    let storeSize = 0;
+    try { storeSize = fs.statSync(cfg.storePath).size; } catch (e) {}
+    return json(res, 200, {
+      app: updater.installed(),
+      latest: store.data.updateCheck ? store.data.updateCheck.remote : null,
+      updateAvailable: !!(store.data.updateCheck && store.data.updateCheck.remote && store.data.updateCheck.updateAvailable && store.data.updateCheck.newer),
+      lastCheck: store.data.updateCheck ? store.data.updateCheck.checkedAt : null,
+      restart: restart.describe(cfg),
+      server: {
+        node: process.version,
+        platform: `${process.platform}/${process.arch}`,
+        uptimeSec: Math.round((Date.now() - STARTED) / 1000),
+        starts: store.data.counters.starts,
+        startedAt: STARTED,
+        loadavg: process.loadavg ? process.loadavg().map(n => Math.round(n * 100) / 100) : [],
+        rssBytes: mem.rss,
+        heapUsed: mem.heapUsed,
+        storeBytes: storeSize,
+        dataDir: cfg.dataDir,
+        appDir: cfg.appDir,
+        host: cfg.host,
+        port: cfg.port,
+        trustProxy: cfg.trustProxy,
+        versionsDirBytes: (() => { try { return dirSize(cfg.versionsDir); } catch (e) { return 0; } })(),
+      },
+      stats: summary,
+      settings: publicSettings(),
+      sessions: store.data.sessions.map(s => ({ ip: s.ip, ua: s.ua, createdAt: s.createdAt, lastSeen: s.lastSeen, current: s.id === sess.id })),
+    });
+  }
+
+  /* -- visits --------------------------------------------------------------- */
+  if (method === 'GET' && (route === 'visits' || route === 'visits.csv')) {
+    const q = url.parse(req.url, true).query;
+    const opts = {
+      day: q.day || undefined,
+      country: q.country || undefined,
+      ip: q.ip || undefined,
+      q: q.q || undefined,
+      limit: Math.min(1000, Number(q.limit) || 100),
+      offset: Math.max(0, Number(q.offset) || 0),
+      bots: q.bots === '1',
+    };
+    const result = stats.query(store, opts);
+    if (route === 'visits.csv') {
+      const body = stats.csv(result.rows);
+      return send(res, 200, body, {
+        'content-type': 'text/csv; charset=utf-8',
+        'content-disposition': `attachment; filename="meow-visits-${stats.dayKey(Date.now())}.csv"`,
+      });
+    }
+    return json(res, 200, {
+      total: result.total,
+      offset: result.offset,
+      limit: result.limit,
+      rows: result.rows,
+      summary: stats.summarize(store, { days: 30 }),
+      privacyMode: !store.data.settings.storeRawIp,
+    });
+  }
+
+  if (method === 'POST' && route === 'visits/clear') {
+    const body = await readJson(req);
+    if (body.confirm !== 'clear-visits') return json(res, 400, { error: 'confirmation missing' });
+    const n = store.data.visits.length;
+    store.data.visits = [];
+    store.data.dayStats = {};
+    store.audit(store.data.admin.username, 'visits-cleared', `${n} rows`, ipInfo.ip);
+    store.save();
+    return json(res, 200, { ok: true, cleared: n });
+  }
+
+  /* -- credentials ---------------------------------------------------------- */
+  if (method === 'POST' && route === 'credentials') {
+    const body = await readJson(req);
+    if (!auth.verifyPassword(String(body.currentPassword || ''), store.data.admin)) {
+      store.audit(store.data.admin.username, 'credentials-rejected', 'wrong current password', ipInfo.ip);
+      return json(res, 403, { error: 'current password is wrong' });
+    }
+    const username = body.username !== undefined ? String(body.username).trim() : store.data.admin.username;
+    if (!/^[a-zA-Z0-9._-]{3,32}$/.test(username)) {
+      return json(res, 400, { error: 'username must be 3-32 characters (letters, digits, . _ -)' });
+    }
+    let changed = [];
+    if (username !== store.data.admin.username) changed.push('username');
+    if (body.newPassword) {
+      const pwProblem = auth.passwordProblem(String(body.newPassword));
+      if (pwProblem) return json(res, 400, { error: pwProblem });
+      if (String(body.newPassword) === String(body.currentPassword)) {
+        return json(res, 400, { error: 'the new password is the same as the current one' });
+      }
+      store.setAdmin(username, String(body.newPassword), auth);
+      changed.push('password');
+    } else if (username !== store.data.admin.username) {
+      store.data.admin.username = username;
+      store.data.admin.updatedAt = Date.now();
+      store.dirty();
+    }
+    if (!changed.length) return json(res, 400, { error: 'nothing to change' });
+
+    /* a credential change invalidates every other session */
+    store.data.sessions = store.data.sessions.filter(s => s.id === sess.id);
+    store.audit(username, 'credentials-changed', changed.join('+'), ipInfo.ip);
+    store.save();
+    return json(res, 200, { ok: true, changed, username });
+  }
+
+  /* -- updates -------------------------------------------------------------- */
+  if (method === 'GET' && route === 'updates') {
+    return json(res, 200, {
+      app: updater.installed(),
+      lastCheck: store.data.updateCheck,
+      history: updater.history(),
+      log: updater.logTail(80),
+      settings: publicSettings(),
+      restart: restart.describe(cfg),
+      repo: store.data.settings.githubRepo,
+      channel: store.data.settings.updateChannel,
+    });
+  }
+
+  if (method === 'POST' && route === 'updates/check') {
+    const result = await updater.check();
+    store.data.updateCheck = result;
+    store.dirty();
+    if (result.error) store.log('warn', `update check: ${result.error}`);
+    else if (result.remote) {
+      store.log('info', `update check: running v${result.installed.version}${result.installed.sha ? ` (${result.installed.shortSha})` : ''}, remote v${result.remote.version} (${result.remote.shortSha})`);
+    }
+    return json(res, 200, result);
+  }
+
+  if (method === 'POST' && route === 'updates/install') {
+    const body = await readJson(req).catch(() => ({}));
+    let result;
+    try {
+      result = await updater.install({ sha: body.sha || null, version: body.version || null });
+    } catch (e) {
+      return json(res, 500, { error: e.message });
+    }
+    store.data.updateCheck = null;
+    store.dirty();
+    if (result.changed) {
+      const delay = Number(body.restartDelayMs) || 1500;
+      const ok = restart.schedule(cfg, store, delay, `installed v${result.version}`);
+      result.restarting = ok;
+      result.restartMode = restart.describe(cfg).mode;
+      if (!ok) {
+        result.note = restart.describe(cfg).mode === 'off'
+          ? 'restarting is disabled in the configuration — restart the service to load the new code'
+          : 'a restart was already scheduled';
+      }
+    }
+    return json(res, 200, result);
+  }
+
+  if (method === 'POST' && route === 'updates/rollback') {
+    const body = await readJson(req).catch(() => ({}));
+    let result;
+    try {
+      result = await updater.rollback(body.version || body.sha || null);
+    } catch (e) {
+      return json(res, 500, { error: e.message });
+    }
+    const ok = restart.schedule(cfg, store, Number(body.restartDelayMs) || 1500, `rolled back to v${result.version}`);
+    result.restarting = ok;
+    if (!ok) result.note = 'a restart was already scheduled — the service will come back on its own';
+    return json(res, 200, result);
+  }
+
+  /* -- settings ------------------------------------------------------------- */
+  if (method === 'POST' && route === 'settings') {
+    const body = await readJson(req);
+    const s = store.data.settings;
+    const before = JSON.stringify(s);
+    if (body.storeRawIp !== undefined) s.storeRawIp = !!body.storeRawIp;
+    if (body.geoLookup !== undefined) s.geoLookup = !!body.geoLookup;
+    if (body.autoCheckUpdates !== undefined) s.autoCheckUpdates = !!body.autoCheckUpdates;
+    if (body.autoInstallUpdates !== undefined) s.autoInstallUpdates = !!body.autoInstallUpdates;
+    if (body.retentionDays !== undefined) s.retentionDays = Math.max(1, Math.min(3650, Number(body.retentionDays) || 90));
+    if (body.updateChannel !== undefined) s.updateChannel = String(body.updateChannel).trim().slice(0, 60) || 'main';
+    if (body.githubRepo !== undefined) s.githubRepo = String(body.githubRepo).trim().slice(0, 120);
+    if (body.publicBaseUrl !== undefined) s.publicBaseUrl = String(body.publicBaseUrl).trim().slice(0, 200);
+    if (body.githubToken !== undefined && body.githubToken !== '***') s.githubToken = String(body.githubToken).trim().slice(0, 200);
+    store.prune();
+    if (before !== JSON.stringify(s)) {
+      store.audit(store.data.admin.username, 'settings-changed', diffKeys(JSON.parse(before), s).join(','), ipInfo.ip);
+    }
+    store.save();
+    return json(res, 200, { ok: true, settings: publicSettings() });
+  }
+
+  if (method === 'POST' && route === 'restart') {
+    const ok = restart.schedule(cfg, store, 800, 'admin requested');
+    store.audit(store.data.admin.username, 'restart', restart.describe(cfg).mode, ipInfo.ip);
+    return json(res, 200, { ok, mode: restart.describe(cfg).mode });
+  }
+
+  if (method === 'GET' && route === 'audit') {
+    return json(res, 200, { rows: store.data.audit.slice(-300).reverse() });
+  }
+
+  return json(res, 404, { error: 'unknown admin route' });
+}
+
+function isSecure(req) {
+  if (cfg.trustProxy && String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() === 'https') return true;
+  return !!(req.socket.encrypted);
+}
+
+function publicSettings() {
+  const s = store.data.settings;
+  return {
+    storeRawIp: s.storeRawIp,
+    retentionDays: s.retentionDays,
+    geoLookup: s.geoLookup,
+    autoCheckUpdates: s.autoCheckUpdates,
+    autoInstallUpdates: s.autoInstallUpdates,
+    updateChannel: s.updateChannel,
+    githubRepo: s.githubRepo,
+    githubToken: s.githubToken ? '***' : '',
+    publicBaseUrl: s.publicBaseUrl,
+  };
+}
+
+function diffKeys(a, b) {
+  const out = [];
+  for (const k of new Set([...Object.keys(a || {}), ...Object.keys(b || {})])) {
+    if (JSON.stringify(a[k]) !== JSON.stringify(b[k])) out.push(k);
+  }
+  return out;
+}
+
+/* ------------------------------------------------------------- housekeeping */
+
+function housekeeping() {
+  store.prune();
+  store.save();
+}
+
+async function autoUpdateCheck() {
+  if (!store.data.settings.autoCheckUpdates) return;
+  try {
+    const result = await updater.check();
+    store.data.updateCheck = result;
+    store.dirty();
+    if (result.error) { log('warn', `automatic update check: ${result.error}`); return; }
+    if (result.updateAvailable && result.newer) {
+      store.log('info', `update available: v${result.remote.version} (${result.remote.shortSha})`);
+      if (store.data.settings.autoInstallUpdates) {
+        const key = result.remote.sha;
+        if (store.data.lastAutoAttempt !== key) {
+          store.data.lastAutoAttempt = key;
+          store.dirty();
+          log('info', `auto-installing v${result.remote.version}`);
+          const out = await updater.install({ auto: true, sha: key, version: result.remote.version });
+          if (out.changed) restart.schedule(cfg, store, 1500, `auto-installed v${out.version}`);
+        }
+      }
+    }
+  } catch (e) {
+    log('warn', `automatic update check failed: ${e.message}`);
+  }
+}
+
+/* ------------------------------------------------------------------- startup */
+
+async function main() {
+  if (process.argv.includes('--print-version')) {
+    console.log(store.data.app.version);
+    process.exit(0);
+  }
+  if (process.argv.includes('--print-setup-token')) {
+    console.log(store.data.setup.used ? '(registration already completed)' : store.data.setup.token);
+    process.exit(0);
+  }
+
+  const supervised = process.env.MEOW_SUPERVISED === '1';
+  if (supervised) {
+    const free = await restart.waitForPort(cfg, 20000);
+    if (!free) log('warn', 'the port did not free up in time — trying anyway');
+  }
+
+  const server = http.createServer((req, res) => {
+    handler(req, res).catch(e => {
+      log('error', `unhandled: ${e && e.stack ? e.stack.split('\n')[0] : e}`);
+      if (!res.headersSent) json(res, 500, { error: 'internal error' });
+    });
+  });
+
+  server.on('error', err => {
+    if (err.code === 'EADDRINUSE') {
+      log('error', `port ${cfg.port} is already in use (another copy still running?)`);
+      process.exit(1);
+    }
+    log('error', `server error: ${err.message}`);
+  });
+
+  server.listen(cfg.port, cfg.host, () => {
+    const v = store.data.app.version;
+    log('info', `meow translator v${v} listening on http://${cfg.host}:${cfg.port}/`);
+    log('info', `app dir ${cfg.appDir} · data dir ${cfg.dataDir}`);
+    log('info', `restart mode: ${restart.describe(cfg).detail}`);
+    if (!store.data.admin) log('info', `no admin yet — finish setup at /admin with the token from "meow-translator token"`);
+  });
+
+  /* keep the process from holding anything open it should not */
+  housekeeping();
+  const hk = setInterval(housekeeping, 5 * 60 * 1000);
+  hk.unref();
+  const ac = setInterval(autoUpdateCheck, 6 * 3600 * 1000);
+  ac.unref();
+  setTimeout(() => { if (store.data.settings.autoCheckUpdates) autoUpdateCheck(); }, 15000).unref();
+
+  for (const sig of ['SIGINT', 'SIGTERM']) {
+    process.on(sig, () => {
+      log('info', `${sig} — flushing store and shutting down`);
+      try { store.save(); } catch (e) {}
+      server.close(() => process.exit(0));
+      setTimeout(() => process.exit(0), 2000).unref();
+    });
+  }
+  process.on('uncaughtException', e => log('error', `uncaught exception: ${e && e.stack ? e.stack : e}`));
+  process.on('unhandledRejection', e => log('error', `unhandled rejection: ${e && e.stack ? e.stack : e}`));
+}
+
+if (require.main === module) main();
+
+module.exports = { handler, cfg, store, updater, geo };

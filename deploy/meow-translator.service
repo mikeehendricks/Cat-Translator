@@ -1,0 +1,42 @@
+[Unit]
+Description=Meow translator — text to cat language and back (web service)
+Documentation=https://github.com/mikeehendricks/Cat-Translator
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=meow
+Group=meow
+WorkingDirectory=/opt/meow-translator
+
+# The service restarts itself after an update by exiting cleanly, so
+# Restart=always is load-bearing: without it a clean exit stops the service.
+Restart=always
+RestartSec=1
+ExitCodeSuccess=0
+
+ExecStart=/usr/bin/node /opt/meow-translator/server/server.js
+Environment=NODE_ENV=production
+EnvironmentFile=-/etc/meow-translator/environment
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=meow-translator
+
+# Modest hardening. Deliberately no MemoryDenyWriteExecute: V8's JIT needs it.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+ReadWritePaths=/opt/meow-translator /var/lib/meow-translator
+
+[Install]
+WantedBy=multi-user.target

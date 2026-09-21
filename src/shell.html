@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cat Translator — English ⇄ Meownese</title>
+<style>
+  :root{
+    --bg:#0f0d12; --bg2:#171420; --card:#1d1930; --card2:#241f3b; --line:#332c4d;
+    --ink:#f4f1ea; --muted:#a99fc4; --amber:#ffcd5c; --amber2:#ff9d3d;
+    --green:#7bf1a8; --red:#ff6b6b; --violet:#9d7bff; --radius:18px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:
+      radial-gradient(1100px 600px at 12% -10%, #2a2148 0%, transparent 60%),
+      radial-gradient(900px 500px at 100% 0%, #1d2b40 0%, transparent 55%),
+      var(--bg);
+    color:var(--ink);
+    font:16px/1.55 ui-rounded,"SF Pro Rounded",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    min-height:100vh;
+    padding:28px 18px 64px;
+  }
+  .wrap{max-width:1180px;margin:0 auto}
+  header{display:flex;align-items:center;gap:16px;margin-bottom:8px;flex-wrap:wrap}
+  .logo{width:56px;height:56px;flex:0 0 auto;filter:drop-shadow(0 6px 14px rgba(255,157,61,.28))}
+  h1{font-size:clamp(24px,3.2vw,38px);margin:0;letter-spacing:.2px}
+  h1 span{background:linear-gradient(92deg,var(--amber),var(--amber2) 60%,var(--violet));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .tagline{color:var(--muted);margin:2px 0 0;font-size:15px}
+  .chip{display:inline-flex;align-items:center;gap:7px;background:#ffffff10;border:1px solid var(--line);
+        color:var(--muted);border-radius:999px;padding:5px 12px;font-size:12.5px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:22px}
+  @media (max-width:900px){.grid{grid-template-columns:1fr}}
+  .card{background:linear-gradient(180deg,var(--card),var(--bg2));border:1px solid var(--line);border-radius:var(--radius);
+        padding:20px;box-shadow:0 18px 40px rgba(0,0,0,.35)}
+  .card h2{margin:0 0 4px;font-size:19px;display:flex;align-items:center;gap:9px}
+  .card h2 .pane{font-size:12px;font-weight:600;color:var(--amber);background:#ffcd5c1c;border:1px solid #ffcd5c33;
+        border-radius:999px;padding:2px 9px}
+  .card p.lead{color:var(--muted);margin:0 0 14px;font-size:14px}
+  textarea{width:100%;min-height:96px;resize:vertical;background:#100e19;border:1px solid var(--line);color:var(--ink);
+        border-radius:12px;padding:13px 14px;font:inherit;font-size:16px}
+  textarea:focus{outline:2px solid var(--violet);outline-offset:1px}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:12px}
+  button{font:inherit;cursor:pointer;border-radius:12px;border:1px solid var(--line);background:#ffffff0d;color:var(--ink);
+        padding:11px 16px;transition:transform .06s ease, background .15s ease, border-color .15s ease}
+  button:hover{background:#ffffff17;border-color:#4a3f6b}
+  button:active{transform:translateY(1px)}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  button.primary{background:linear-gradient(180deg,var(--amber),var(--amber2));border-color:#0000;color:#2a1b06;font-weight:700}
+  button.primary:hover{filter:brightness(1.06)}
+  button.ghost{background:#ffffff08}
+  button.tag,button.preset{background:#ffffff0a;border-radius:999px;padding:7px 13px;font-size:13.5px}
+  button.tag:hover{background:#ffcd5c22;border-color:#ffcd5c55}
+  button.rec{border-color:#ff6b6b66;background:#ff6b6b1a}
+  .tags{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+  .result{margin-top:16px;border-top:1px dashed var(--line);padding-top:16px}
+  .hidden{display:none}
+  .glyphs{display:flex;gap:8px;flex-wrap:wrap}
+  .chip{position:relative}
+  .glyphs .chip{flex-direction:column;gap:2px;background:#ffffff0a;border:1px solid var(--line);border-radius:12px;
+        padding:7px 10px;min-width:52px;align-items:center;color:var(--ink);transition:.15s}
+  .glyphs .chip b{font-size:20px;line-height:1.1}
+  .glyphs .chip i{font-style:normal;color:var(--muted);font-size:11.5px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .glyphs .chip.active{background:#ffcd5c2e;border-color:var(--amber);transform:translateY(-3px) scale(1.06);
+        box-shadow:0 10px 22px #ffcd5c33}
+  .meowtext{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--amber);word-break:break-word;
+        background:#00000033;border:1px solid var(--line);border-radius:10px;padding:9px 11px;margin-top:10px;font-size:14px}
+  canvas{display:block;width:100%;border-radius:10px;background:#0b0913;border:1px solid var(--line)}
+  #wave{height:88px;margin-top:12px}
+  #meter{height:14px;margin-top:12px;background:#0b0913}
+  .muted{color:var(--muted)}
+  .small{font-size:13px}
+  .big{font-size:26px;font-weight:700;letter-spacing:.2px}
+  .heard-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .badge{border-radius:999px;padding:3px 11px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.6px}
+  .badge.ok{background:#7bf1a822;color:var(--green);border:1px solid #7bf1a855}
+  .badge.warn{background:#ff6b6b22;color:var(--red);border:1px solid #ff6b6b55}
+  .cands{margin-top:14px;display:flex;flex-direction:column;gap:8px}
+  .cand{display:grid;grid-template-columns:1fr 130px auto;gap:10px;align-items:center;background:#ffffff08;
+        border:1px solid var(--line);border-radius:12px;padding:8px 11px;cursor:pointer;font-size:14.5px}
+  .cand:hover{background:#ffffff14}
+  .cand.top{border-color:#ffcd5c66;background:#ffcd5c14}
+  .cand-word{font-weight:600}
+  .cand-meow{font-family:ui-monospace,Menlo,monospace;color:var(--muted);font-size:12px}
+  .bar{display:block;height:7px;border-radius:99px;background:#ffffff14;overflow:hidden}
+  .bar i{display:block;height:100%;background:linear-gradient(90deg,var(--amber),var(--violet))}
+  .hintbar{margin-top:12px;color:var(--muted);font-size:13.5px;min-height:1px}
+  .sentence{margin-top:16px;border-top:1px dashed var(--line);padding-top:14px}
+  .meowline{font-size:18px;margin-top:6px}
+  .permeow{margin-top:8px}
+  .pill{display:inline-block;background:#ffffff0d;border:1px solid var(--line);border-radius:999px;padding:2px 10px;
+        font-size:12.5px;margin-left:5px}
+  .pill.top{background:#ffcd5c22;border-color:#ffcd5c55}
+  .sliders{display:grid;grid-template-columns:auto 1fr;gap:8px 14px;align-items:center;margin-top:14px;font-size:13.5px;color:var(--muted)}
+  input[type=range]{width:100%;accent-color:var(--amber)}
+  .presets{display:grid;grid-template-columns:repeat(auto-fill,minmax(158px,1fr));gap:9px;margin-top:12px}
+  button.preset{display:flex;flex-direction:column;gap:3px;align-items:flex-start;border-radius:12px;padding:9px 11px;text-align:left}
+  button.preset b{font-size:13.5px;font-weight:600}
+  button.preset i{font-style:normal;font-size:15px;line-height:1.2}
+  details.how{margin-top:22px;background:#ffffff07;border:1px solid var(--line);border-radius:var(--radius);padding:16px 20px}
+  details.how summary{cursor:pointer;font-weight:600;font-size:16.5px}
+  details.how h3{margin:18px 0 6px;font-size:15px;color:var(--amber)}
+  details.how ul{margin:6px 0;padding-left:20px;color:#d8d3ea}
+  details.how code{background:#00000044;border:1px solid var(--line);border-radius:6px;padding:1px 6px;font-size:13px}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:12px}
+  .stat{background:#00000033;border:1px solid var(--line);border-radius:12px;padding:11px 13px}
+  .stat b{display:block;font-size:22px;color:var(--amber)}
+  .stat span{color:var(--muted);font-size:12.5px}
+  footer{margin-top:26px;color:var(--muted);font-size:13px;text-align:center}
+  .versionline{margin-top:8px;display:flex;gap:10px;justify-content:center;align-items:center;flex-wrap:wrap}
+  .vbadge{font-size:12px;padding:2px 9px;border-radius:999px;border:1px solid var(--line);background:#1c1828;color:var(--muted)}
+  .vnote{font-size:12px}
+  .vnote a{color:var(--amber)}
+  .notice{background:#ffcd5c14;border:1px solid #ffcd5c3d;color:#ffe6a8;border-radius:12px;padding:10px 13px;font-size:13.5px;margin-bottom:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <svg class="logo" viewBox="0 0 64 64" aria-hidden="true">
+      <path d="M32 6c-9 0-15 4-18 9-4-3-8-6-9-5-2 1-1 8 1 13-2 4-3 8-3 12 0 11 13 20 29 20s29-9 29-20c0-4-1-8-3-12 2-5 3-12 1-13-1-1-5 2-9 5-3-5-9-9-18-9z" fill="#ffcd5c"/>
+      <path d="M20 22c-2-1-4-3-4-4 1 0 3 1 4 2zm24 0c2-1 4-3 4-4-1 0-3 1-4 2z" fill="#b8802a"/>
+      <ellipse cx="23" cy="33" rx="3.4" ry="4.6" fill="#2b1d0b"/>
+      <ellipse cx="41" cy="33" rx="3.4" ry="4.6" fill="#2b1d0b"/>
+      <ellipse cx="23.8" cy="31.6" rx="1.1" ry="1.5" fill="#fff8e1"/>
+      <ellipse cx="41.8" cy="31.6" rx="1.1" ry="1.5" fill="#fff8e1"/>
+      <path d="M32 41l-4 3 4 3 4-3z" fill="#ff8fa3"/>
+      <path d="M32 47v3M32 50c-2 2-5 2-6 0M32 50c2 2 5 2 6 0" stroke="#2b1d0b" stroke-width="1.6" fill="none" stroke-linecap="round"/>
+      <path d="M12 38l-8 2M12 42l-8 1M52 38l8 2M52 42l8 1" stroke="#ffcd5c" stroke-width="1.6" stroke-linecap="round" opacity=".85"/>
+    </svg>
+    <div style="flex:1 1 320px">
+      <h1>Cat <span>Translator</span></h1>
+      <p class="tagline">Type English, get meows you can play — record a meow, get the English back.</p>
+    </div>
+    <span class="chip">🐾 a working codec, not real cat linguistics</span>
+  </header>
+
+  <div id="bootNotice" class="notice">Loading the meow codec…</div>
+
+  <div class="grid">
+
+    <!-- ─────────────────────────── English → Meow ─────────────────────────── -->
+    <section class="card">
+      <h2><span class="pane">A</span> English → Meow</h2>
+      <p class="lead">Anything you type is cut into words, each word becomes its own meow, and the
+        meows are synthesised with a formant voice — no recordings, everything is generated live.</p>
+
+      <textarea id="englishIn" spellcheck="false"
+        placeholder="i love you so much  ·  feed me please  ·  do you want to play">i love you so much</textarea>
+      <div class="tags" id="examples"></div>
+
+      <div class="row">
+        <button class="primary" id="translateBtn">Translate to Meownese</button>
+        <button id="stopBtn" class="ghost">■ Stop audio</button>
+      </div>
+
+      <div id="encodeResult" class="result hidden"></div>
+
+      <canvas id="wave"></canvas>
+
+      <div class="sliders">
+        <label for="voicePitch">voice pitch</label><input id="voicePitch" type="range" min="0.80" max="1.25" step="0.01" value="1">
+        <label for="voiceSpeed">meow length</label><input id="voiceSpeed" type="range" min="0.85" max="1.30" step="0.01" value="1">
+        <label for="voiceGruff">rasp</label><input id="voiceGruff" type="range" min="0.80" max="1.40" step="0.01" value="1">
+        <span></span>
+        <div class="row" style="margin:0">
+          <button class="ghost" id="voiceRandom">🎲 randomise this cat</button>
+          <span class="muted small" id="voiceLabel"></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─────────────────────────── Meow → English ─────────────────────────── -->
+    <section class="card">
+      <h2><span class="pane">B</span> Meow → English</h2>
+      <p class="lead">The recording is split into individual meows; each one is fingerprinted and matched
+        against every meow in the codebook. The top three readings are shown, because cats — and cheap
+        microphones — are ambiguous.</p>
+
+      <div class="row">
+        <button class="rec" id="recordBtn">● Record a meow</button>
+        <button class="ghost" id="selfTest">🔁 Read back the last meow</button>
+      </div>
+      <canvas id="meter"></canvas>
+      <div class="muted small" id="recStatus" style="margin-top:8px"></div>
+
+      <h3 style="font-size:14px;color:var(--muted);margin:18px 0 0">Ready meows — press one and watch it be read back</h3>
+      <div class="presets" id="presets"></div>
+
+      <div id="listenResult" class="result hidden"></div>
+    </section>
+  </div>
+
+  <!-- ─────────────────────────── How it works ─────────────────────────── -->
+  <details class="how">
+    <summary>How it works (and how well it actually works)</summary>
+
+    <h3>The meow codec</h3>
+    <p class="small">A meow is described by four properties, so it is written as a token:</p>
+    <ul class="small">
+      <li><code>onset</code> — <code>m</code>, <code>prr</code> (trilled), <code>h</code> (breathy) or none → "me", "prrme", "hme", "e"</li>
+      <li><code>vowel</code> — <code>a e i o u y</code>, which sets the formants</li>
+      <li><code>tone</code> — flat, rise ↑, fall ↓, arch ˆ, dip ˌ (a real pitch contour, in semitones)</li>
+      <li><code>length</code> — short ·, normal, long :</li>
+    </ul>
+    <p class="small">Four specials exist too: <code>purr</code>, <code>hiss</code>, <code>chirp</code> (sharp rising call) and
+      <code>chatter</code> (the machine-gun trill at birds). "thank you" is <code>my↑ me↑</code>; "no" is <code>hu↓:</code>.</p>
+
+    <h3>Choosing the codebook</h3>
+    <p class="small">Both ends of this translator are mine, so which sound means which word was a design choice.
+      Rather than hand-picking sounds that later turn out to be indistinguishable, the generator renders all
+      <b>364 possible meows</b>, measures a 33-number fingerprint of each, and picks the ~115 that sit farthest
+      apart in that acoustic space. Each meaning keeps the tone and length of its original hand-written meow
+      (falling = no/bad, rising = question/urgency) and only vowel and onset are reassigned for distinctness.
+      Numbers are counted out as repeats of one counting meow, so a missed meow shifts the number instead of
+      corrupting the sentence.</p>
+
+    <h3>How the listening works</h3>
+    <ul class="small">
+      <li>Audio is resampled to a canonical 22.05 kHz (44.1/48 kHz recordings come in from phones and laptops).</li>
+      <li>Energy gaps split the recording into individual meows.</li>
+      <li>Each meow becomes 33 numbers: pitch contour, range, duration, harmonicity, spectral flatness,
+        a purr detector (18–45 Hz rumble), a trill detector (15–40 Hz flutter), plus 16 log-spaced bands
+        measured after pitch-normalising the spectrum (so a deep voice lines up with the reference).</li>
+      <li>Pitch is tracked by a normalised autocorrelation on a 300 Hz–2.5 kHz band, so a 26 Hz purr
+        cannot drag the estimate onto its own harmonics.</li>
+      <li>Every meow is summarised by {{STAT:TEMPLATES}} fingerprints rendered by the synthesiser itself,
+        then treated as a small Gaussian (its own mean and spread per dimension) — so a meow that naturally
+        wanders in one dimension stops shouting for that meow only. Weights come from a coordinate-ascent
+        search on a held-out set.</li>
+    </ul>
+
+    <h3>Measured accuracy</h3>
+    <p class="small">Evaluated with fresh meows (unseen voice, speed, level, hiss, muffled microphone, 22/44/48 kHz capture),
+      one to four meows per utterance:</p>
+    <div class="stats">
+      <div class="stat"><b>{{STAT:TOP1}}</b><span>per-meow top-1 (n={{STAT:MEOWNS}})</span></div>
+      <div class="stat"><b>{{STAT:TOP3}}</b><span>per-meow top-3</span></div>
+      <div class="stat"><b>{{STAT:WORD}}</b><span>word accuracy</span></div>
+      <div class="stat"><b>{{STAT:SENT}}</b><span>whole utterance exact</span></div>
+    </div>
+    <p class="small muted" style="margin-top:10px">That is why the app shows four candidates instead of pretending to be certain — and why you can
+      tap the reading you meant, which re-decodes the whole sentence on the spot. "Read back the last meow",
+      which skips the microphone, is nearly exact.</p>
+    <p class="small muted">Adding one condition at a time to the same meows: identical to a reference call
+      99 %, a new voice or speed 100 %, a quiet recording 100 %, light hiss 100 %, a muffled microphone 99 %,
+      a 48 kHz capture 98 % — and 16 kHz capture only 66 %, because a 16 kHz recording genuinely has no top
+      octave. Phones and laptops capture at 44.1–48 kHz.</p>
+
+    <h3>What this is not</h3>
+    <p class="small">Real cats don't have words. This is a constructed language you can hear: a codec where the
+      speaker and the listener were designed together, so the round trip is genuinely decodable. Your cat is
+      probably reacting to the pitch, the rhythm and your attention — which, to be fair, is most of what it
+      ever wanted anyway.</p>
+  </details>
+
+  <footer>
+    <div>meow codec · {{STAT:LEXICON}} word meanings, {{STAT:CODES}} distinct meows · synthesis + recognition run entirely in your browser</div>
+    <div class="versionline">
+      <span class="vbadge" id="appVersion">version {{VERSION}}</span>
+      <span id="updateNote" class="vnote"></span>
+    </div>
+  </footer>
+</div>
+
+<script>
+/*__MEOW_SCRIPTS__*/
+</script>
+<script>
+  try {
+    MEOW_APP.init();
+
+  /* When served by the server (rather than opened as a file) ask it which
+     version is deployed, so the badge reflects the running code after an update. */
+  (function versionBadge() {
+    var badge = doc.el.getElementById('appVersion');
+    var note = doc.el.getElementById('updateNote');
+    if (!badge || !doc.el.defaultView || !doc.el.defaultView.fetch) return;
+    if (location.protocol === 'file:') return;
+    fetch('/api/version', { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (v) {
+        if (!v || !v.version) return;
+        badge.textContent = 'version ' + v.version + (v.shortSha ? ' · ' + v.shortSha : '');
+        if (v.updateAvailable && v.latest) {
+          note.innerHTML = 'v' + v.latest.version + ' is available' +
+            (v.latest.url ? ' — <a href="' + v.latest.url + '" target="_blank" rel="noopener">what changed</a>' : '');
+        }
+      })
+      .catch(function () { /* offline, or the file was opened directly: keep the built-in label */ });
+  })();
+  } catch (err) {
+    document.getElementById('bootNotice').innerHTML =
+      'Could not start the meow engine: ' + (err && err.message ? err.message : err);
+  }
+</script>
+</body>
+</html>

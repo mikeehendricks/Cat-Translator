@@ -1,0 +1,54 @@
+{
+ "utterances": 300,
+ "meowsPerUtterance": [
+  1,
+  4
+ ],
+ "meowTop1": 0.917,
+ "meowTop3": 0.978,
+ "meowSamples": 733,
+ "wordAcc": 0.909,
+ "sentenceExact": 0.807,
+ "utterancesWithNoMeow": 0,
+ "variants": {
+  "selfTest": {
+   "utterances": 300,
+   "meowsPerUtterance": [
+    1,
+    4
+   ],
+   "meowTop1": 0.976,
+   "meowTop3": 1,
+   "meowSamples": 654,
+   "wordAcc": 0.974,
+   "sentenceExact": 0.943,
+   "utterancesWithNoMeow": 0
+  },
+  "clean": {
+   "utterances": 300,
+   "meowsPerUtterance": [
+    1,
+    4
+   ],
+   "meowTop1": 0.917,
+   "meowTop3": 0.978,
+   "meowSamples": 733,
+   "wordAcc": 0.909,
+   "sentenceExact": 0.807,
+   "utterancesWithNoMeow": 0
+  },
+  "harsh": {
+   "utterances": 300,
+   "meowsPerUtterance": [
+    1,
+    4
+   ],
+   "meowTop1": 0.673,
+   "meowTop3": 0.798,
+   "meowSamples": 752,
+   "wordAcc": 0.664,
+   "sentenceExact": 0.45,
+   "utterancesWithNoMeow": 0
+  }
+ }
+}
