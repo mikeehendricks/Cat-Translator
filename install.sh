@@ -415,14 +415,16 @@ fi
 
 # --------------------------------------------------------------------- report
 if printf '%s' "$SETUP_TOKEN" | grep -qE '^[A-Za-z0-9_-]{20,}$'; then
-  TOKEN_BLOCK="  One-time admin setup token (registration only works once):
+  TOKEN_BLOCK="  One-time admin setup token (registration only works once). Open the admin
+  panel and paste it in to create your admin account:
 
       $SETUP_TOKEN
 
-  Open the admin panel and paste it to create your admin account:"
+  Admin panel:"
 elif [ -n "$SETUP_TOKEN" ]; then
   TOKEN_BLOCK="  Registration is already complete on this instance, so the service kept the
-  existing account. Sign in at the admin panel, or reset the password with:
+  existing account — nothing was reset. Sign in at the admin panel, or reset the
+  password with:
 
       sudo meow-translator reset-password
 
@@ -450,8 +452,6 @@ $(printf '%s' "$TOKEN_BLOCK")
     files      $APP_DIR          (code, replaced by updates)
     data       $DATA_DIR         (visits, credentials, settings — survives updates)
     config     $CONF_DIR/config.json
-
-  Open ${URL%/}/admin and use that token to create your admin account.
 
 REPORT
 
