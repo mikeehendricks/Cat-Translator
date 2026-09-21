@@ -229,14 +229,33 @@ class Updater {
   }
 
   /** Backup the live tree into the versions store. Returns the backup dir. */
+  /** Create a directory (and its parents) owned like the data directory. */
+  ensureDir(p) {
+    fs.mkdirSync(p, { recursive: true });
+    if (isRoot()) {
+      /* mkdir may have just created versions/ or staging/ as root, so fix those
+         too — not only the leaf — and then the leaf itself and anything in it. */
+      for (const d of [this.cfg.versionsDir, this.cfg.stagingDir]) {
+        if (fs.existsSync(d)) matchOwner(d, this.cfg.dataDir);
+      }
+      matchOwner(p, this.cfg.dataDir);
+      matchOwnerTree(p, this.cfg.dataDir);
+    }
+    return p;
+  }
+
   backup(label, kind) {
     const cur = this.installed();
     const dir = path.join(this.cfg.versionsDir, `${cur.version}-${sha8(cur.sha) || 'local'}-${Date.now()}`);
-    fs.mkdirSync(dir, { recursive: true });
+    this.ensureDir(dir);
     copyTree(this.cfg.appDir, dir, {});
-    /* root may be the one taking this snapshot; the service has to be able to
-       read it back to roll back */
-    matchOwnerTree(dir, this.cfg.versionsDir);
+    /* root may be the one taking this snapshot, and the service has to be able to
+       read it back to roll back — so hand the whole thing to the data directory's
+       owner, the directory itself included. */
+    if (isRoot()) {
+      matchOwner(this.cfg.versionsDir, this.cfg.dataDir);
+      matchOwnerTree(dir, this.cfg.dataDir);
+    }
     this.store.data.versions.push({
       version: cur.version,
       sha: cur.sha,
@@ -352,7 +371,7 @@ class Updater {
 
     const stamp = `${Date.now()}-${process.pid}`;
     const stageRoot = path.join(this.cfg.stagingDir, `in-${stamp}`);
-    fs.mkdirSync(stageRoot, { recursive: true });
+    this.ensureDir(stageRoot);
     const archive = path.join(stageRoot, 'src.tar.gz');
     let tree = null;
     try {
@@ -481,8 +500,9 @@ class Updater {
     const dir = path.join(this.cfg.versionsDir, `install-${fileVersion}-local`);
     if (!fs.existsSync(dir)) {
       try {
-        fs.mkdirSync(dir, { recursive: true });
+        this.ensureDir(dir);
         copyTree(this.cfg.appDir, dir, {});
+        if (isRoot()) matchOwnerTree(dir, this.cfg.dataDir);
         this.store.data.versions.push({ version: fileVersion, sha: '', dir, installedAt: Date.now(), kind: 'install' });
       } catch (e) {
         this.log('warn', `could not snapshot the installed tree: ${e.message}`);
