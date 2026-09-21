@@ -170,6 +170,12 @@ footer {
 .vnote { font-size: var(--t-caption1); }
 .vnote a { font-weight: 600; }
 
+#problemStrip { margin: 0 0 1rem; }
+#problemStrip .btn { margin-left: auto; }
+#problemStrip.warn { border-color: color-mix(in srgb, var(--orange) 40%, transparent); }
+#encodeNote { margin: .375rem 0 .75rem; }
+#encodeNote.warn { color: var(--orange); }
+
 /* While the microphone is open the button changes shape and wording, so the
    state is readable without relying on the colour alone. */
 #recordBtn.is-recording {
@@ -186,6 +192,7 @@ footer {
 </head>
 <body>
 <!--__MEOW_SYMBOLS__-->
+<!--__MEOW_RUNTIME__-->
 
 <!-- ───────────────────────────── chrome bar ──────────────────────────── -->
 <header class="nav" id="nav">
@@ -220,6 +227,9 @@ footer {
     <span>Loading the meow codec…</span>
   </div>
 
+  <!-- Shown only when something actually fails; the app never fails silently. -->
+  <div id="problemStrip" class="notice hidden" role="alert"></div>
+
   <!-- direction: compact widths switch panes, wide widths show both -->
   <div class="segmented direction" role="radiogroup" aria-label="Translation direction">
     <button class="segmented__item" role="radio" aria-checked="true" data-pane="A" type="button">
@@ -249,6 +259,8 @@ footer {
       </div>
       <p class="caption secondary" id="examples-hint" style="margin-bottom:.375rem">Try one of these:</p>
       <div class="tags" id="examples"></div>
+
+      <p class="footnote secondary hidden" id="encodeNote" role="status" aria-live="polite"></p>
 
       <div class="row">
         <button class="btn btn--filled" id="translateBtn" type="button">

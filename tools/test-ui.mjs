@@ -301,5 +301,152 @@ check('the version is on the app page', /version \d+\.\d+\.\d+/.test($('#appVers
 check('appearance hints are declared (color-scheme + theme-color)',
   /name="color-scheme"/.test(html) && /name="theme-color"/.test(html));
 
+
+/* ---------------------------------------------------------------------------
+   Nothing to translate, and a browser with no Web Audio.
+
+   The second of those is the shape of the reported bug: the click handler threw
+   while building an audio context and the browser kept the exception to itself,
+   so the button looked dead. Synthesis and the meow text never needed audio, so
+   a page like that must still translate, still draw, and say plainly that it
+   cannot play.
+   ------------------------------------------------------------------------ */
+
+console.log('\nNothing typed, and nowhere to go with it:');
+{
+  $('#englishIn').value = '   ';
+  $('#translateBtn').click();
+  check('an empty box answers with a hint, not silence',
+    !$('#encodeNote').classList.contains('hidden') && /type a sentence/i.test($('#encodeNote').textContent),
+    $('#encodeNote').textContent);
+  $('#englishIn').value = 'qwertyuiop zzzzz';
+  $('#translateBtn').click();
+  check('unknown words are explained rather than dropped',
+    /lexicon|no meow/i.test($('#encodeNote').textContent), $('#encodeNote').textContent);
+}
+
+console.log('\nWhen something does go wrong, it is visible:');
+{
+  check('the failure strip is out of the way while all is well', $('#problemStrip').classList.contains('hidden'));
+  win.MEOW_APP.reportProblem('Translate', new Error('deliberate test failure'));
+  const strip = $('#problemStrip');
+  check('a failure inside the page is shown, not swallowed',
+    !strip.classList.contains('hidden') && /deliberate test failure/.test(strip.textContent), strip.textContent.slice(0, 120));
+  check('and carries a way to hand the details over', !!$('#problemCopy') && /copy/i.test($('#problemCopy').textContent));
+  const diag = win.MEOW_APP.diagnostics();
+  check('the diagnostics line names the browser and the audio status',
+    /web audio/i.test(diag) && /user agent/i.test(diag) && /encode test/i.test(diag), diag.split('\n')[0]);
+  check('the diagnostics line includes the failure itself', /Translate: deliberate test failure/.test(diag));
+  win.MEOW_APP.reportProblem = win.MEOW_APP.reportProblem;   // exported for the page's own use
+  check('diagnostics is reachable from outside the bundle', typeof win.MEOW_APP.diagnostics === 'function');
+}
+
+/* --------------------------------------------------------------------------- */
+
+function makeCanvasStub(win3) {
+  win3.HTMLCanvasElement.prototype.getContext = function () {
+    const noop = () => {};
+    return {
+      setTransform: noop, clearRect: noop, beginPath: noop, moveTo: noop, lineTo: noop, stroke: noop,
+      fillRect: noop, createLinearGradient: () => ({ addColorStop: noop }),
+      fillStyle: '#000', strokeStyle: '#000', lineWidth: 1,
+    };
+  };
+  win3.requestAnimationFrame = (fn) => setTimeout(() => fn(Date.now()), 16);
+  win3.cancelAnimationFrame = (id) => clearTimeout(id);
+}
+
+async function boot(htmlText, { url, audio, fetchImpl } = {}) {
+  const stray = [];
+  const dom = new JSDOM(htmlText, {
+    runScripts: 'dangerously',
+    pretendToBeVisual: true,
+    url: url || 'http://example.test/',
+    beforeParse(win3) {
+      win3.addEventListener('error', (e) => stray.push(e.message || 'error event'));
+      win3.addEventListener('unhandledrejection', (e) => stray.push('rejection: ' + ((e.reason && e.reason.message) || e.reason)));
+      if (audio === 'none') { win3.AudioContext = undefined; win3.webkitAudioContext = undefined; }
+      else win3.AudioContext = function () { return makeStub(48000); };
+      /* the samples can still be held without a context to play them through */
+      win3.AudioBuffer = function (opts) {
+        this.length = opts.length; this.sampleRate = opts.sampleRate;
+        this.numberOfChannels = opts.numberOfChannels || 1;
+        this.duration = this.length / this.sampleRate;
+        this._d = [new Float32Array(this.length)];
+        this.getChannelData = (i) => this._d[i];
+        this.copyToChannel = (src, i) => this._d[i].set(src.subarray(0, this._d[i].length));
+      };
+      win3.navigator.clipboard = { writeText: () => Promise.resolve() };
+      Object.defineProperty(win3.navigator, 'mediaDevices', {
+        value: { getUserMedia: () => Promise.reject(Object.assign(new Error('denied'), { name: 'NotAllowedError' })) },
+      });
+      makeCanvasStub(win3);
+      if (fetchImpl) win3.fetch = fetchImpl;
+    },
+  });
+  const win3 = dom.window;
+  await new Promise(r => win3.addEventListener('load', r));
+  return { win: win3, stray };
+}
+
+console.log('\nA browser with no Web Audio:');
+{
+  const { win: w, stray } = await boot(html, { audio: 'none' });
+  const q = (sel) => w.document.querySelector(sel);
+  q('#englishIn').value = 'hello cat';
+  q('#translateBtn').click();
+  check('the button still translates when there is no audio to play',
+    !q('#encodeResult').classList.contains('hidden') && /meow/i.test(q('#encodeResult').textContent),
+    q('#encodeResult').textContent.slice(0, 80));
+  check('it says why it is silent instead of doing nothing',
+    !q('#encodeNote').classList.contains('hidden') && /web audio|unavailable|not play audio/i.test(q('#encodeNote').textContent),
+    q('#encodeNote').textContent);
+  check('the meow text is still correct in that browser',
+    q('#encodeResult .meowtext') && q('#encodeResult .meowtext').textContent === w.MEOW_ENGINE.encode('hello cat').meow,
+    q('#encodeResult .meowtext') ? q('#encodeResult .meowtext').textContent : '(no meow text)');
+  check('a browser without audio is not treated as a failure',
+    q('#problemStrip').classList.contains('hidden') && stray.length === 0, stray.join(' | '));
+  check('diagnostics report the missing piece',
+    /web audio\s+unavailable/i.test(w.MEOW_APP.diagnostics()),
+    (w.MEOW_APP.diagnostics().split('\n').find(l => /web audio/.test(l)) || '').trim());
+
+  /* the same browser, a word the lexicon does not know */
+  q('#englishIn').value = 'qqqq wwww';
+  q('#translateBtn').click();
+  check('an unknown word is explained in that browser too',
+    /lexicon|no meow/i.test(q('#encodeNote').textContent), q('#encodeNote').textContent);
+}
+
+console.log('\nThe page asking the visitor’s browser for its address:');
+{
+  const cfg = { report: true, post: '/api/visit/ip', endpoints: ['https://ipwho.is/'] };
+  const withConfig = html.replace('<!--__MEOW_RUNTIME__-->',
+    `<script id="meow-runtime" type="application/json">${JSON.stringify(cfg)}</script>`);
+  const calls = [];
+  const fakeFetch = (url, opts) => {
+    calls.push({ url: String(url), method: (opts && opts.method) || 'GET', body: (opts && opts.body) || null });
+    const payload = /ipwho\.is/.test(String(url)) ? { ip: '93.184.216.34' } : { ok: true };
+    return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) });
+  };
+  const asked = await boot(withConfig, { fetchImpl: fakeFetch });
+  const silent = await boot(html, { fetchImpl: fakeFetch });
+  /* the page waits 1.2 s before asking, deliberately */
+  await new Promise(r => setTimeout(r, 2000));
+  const get = calls.find(c => c.method === 'GET' && /ipwho\.is/.test(c.url));
+  const post = calls.find(c => c.method === 'POST');
+  check('the page asks a public service what address the world sees', !!get && /ipwho\.is/.test(get.url), JSON.stringify(calls[0] || null));
+  check('and reports the answer back to this installation', !!post && post.url === '/api/visit/ip' &&
+    JSON.parse(post.body).ip === '93.184.216.34', JSON.stringify(post || null));
+  check('it asks with no credentials and does not wait for the answer to paint',
+    !!asked.win.MEOW_APP && asked.stray.length === 0, asked.stray.join(' | '));
+  check('with the switch off, or no configuration at all, it asks nobody',
+    calls.filter(c => /ipwho\.is/.test(c.url)).length === 1 &&
+    calls.filter(c => c.method === 'POST').length === 1,
+    JSON.stringify(calls.map(c => c.method + ' ' + c.url)));
+  check('the shipped file on its own reaches no outside service',
+    silent.win.MEOW_APP && silent.stray.length === 0);
+}
+
+
 console.log(fails ? `\n  ${fails} FAILURE(S)\n` : '\n  ALL UI CHECKS PASSED\n');
 process.exit(fails ? 1 : 0);

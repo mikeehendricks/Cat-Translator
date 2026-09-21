@@ -494,7 +494,9 @@ async function loadOverview(quiet) {
             <tr><td class="muted">Uptime</td><td>${fmtDur(sv.uptimeSec)} <span class="tinies">(started ${fmtTime(sv.startedAt)})</span></td></tr>
             <tr><td class="muted">Restarts</td><td>${sv.starts}</td></tr>
             <tr><td class="muted">Node</td><td class="mono">${esc(sv.node)} ${esc(sv.platform)}</td></tr>
-            <tr><td class="muted">Listening</td><td class="mono">${esc(sv.host)}:${sv.port}${sv.trustProxy ? ' <span class="pill">behind proxy</span>' : ''}</td></tr>
+            <tr><td class="muted">Listening</td><td class="mono">${esc(sv.host)}:${sv.port}${sv.trustProxy === true ? ' <span class="pill">trusts proxy headers</span>'
+  : sv.trustProxy === 'auto' ? ' <span class="pill">proxy headers from a local proxy</span>'
+  : ' <span class="pill">socket address only</span>'}</td></tr>
             <tr><td class="muted">Load average</td><td class="mono">${(sv.loadavg || []).join(' · ') || '—'}</td></tr>
             <tr><td class="muted">Memory (rss)</td><td>${fmtBytes(sv.rssBytes)}</td></tr>
             <tr><td class="muted">Store file</td><td>${fmtBytes(sv.storeBytes)}</td></tr>
@@ -550,9 +552,30 @@ function visitsTable(rows, compact) {
       const g = v.geo || null;
       const loc = g ? (g.local ? 'Local network' : [g.city, g.region, g.country].filter(Boolean).join(', ')) || '—'
                     : '<span class="muted tiny">looking up…</span>';
+      /* Where the address came from. A proxy's address shown as the visitor's is
+         the single most misleading thing a visit log can do, so the provenance
+         is part of the row rather than a footnote. */
+      const srcLabel = {
+        socket: 'direct connection',
+        reported: 'reported by the visitor’s browser',
+        cloudflare: 'Cloudflare',
+        'true-client-ip': 'True-Client-IP',
+        'x-real-ip': 'X-Real-IP',
+        'x-client-ip': 'X-Client-IP',
+        'x-forwarded-for': 'X-Forwarded-For',
+        forwarded: 'Forwarded',
+        proxy: 'a proxy',
+      }[v.source] || v.source || '';
+      const flag = v.source === 'reported' ? '<span class="badge info">WAN</span> '
+        : v.private ? '<span class="badge warn">private</span> '
+        : '';
+      const askState = v.reportState === 'asked' ? '<br><span class="tinies">asked the browser for its WAN address</span>'
+        : v.reportState === 'rejected' ? `<br><span class="tinies">report refused: ${esc(v.reportNote || '')}</span>`
+        : '';
       return `<tr>
         <td class="num" title="${esc(fmtTime(v.t))}">${fmtTime(v.t)}<br><span class="tinies">${fmtAgo(v.t)}</span></td>
-        <td class="mono tiny">${esc(v.ip || (v.hash ? 'hidden (' + esc(v.hash.slice(0, 8)) + ')' : '—'))}</td>
+        <td class="mono tiny">${flag}${esc(v.ip || (v.hash ? 'hidden (' + esc(v.hash.slice(0, 8)) + ')' : '—'))}${
+          compact ? '' : `<br><span class="tinies">${esc(srcLabel)}${v.socketIp ? ` · saw ${esc(v.socketIp)} first` : ''}</span>${askState}`}</td>
         <td class="small">${loc}${g && g.isp ? `<br><span class="tinies">${esc(g.isp)}</span>` : ''}</td>
         ${compact ? '' : `<td class="small">${esc(v.device)}</td>
         <td class="small mono">${esc(v.path)}</td>
@@ -924,6 +947,28 @@ async function loadSettings() {
             <option value="1"${s.geoLookup ? ' selected' : ''}>on — resolve country/city from a public IP service</option>
             <option value="0"${!s.geoLookup ? ' selected' : ''}>off — keep every address on this server</option>
           </select>
+          <label>Addresses from a proxy in front</label>
+          <select id="sTrust">
+            <option value="auto"${s.trustProxy === 'auto' ? ' selected' : ''}>auto — believe the headers only from this machine or the LAN (recommended)</option>
+            <option value="1"${s.trustProxy === true ? ' selected' : ''}>on — believe them from anywhere (nginx/Cloudflare you control)</option>
+            <option value="0"${s.trustProxy === false ? ' selected' : ''}>off — ignore them, log the address that connects</option>
+          </select>
+          <label>Visitor&rsquo;s own (WAN) address</label>
+          <select id="sReportIp">
+            <option value="1"${s.reportVisitorIp !== false ? ' selected' : ''}>on — ask the visitor&rsquo;s browser, when this server cannot see a public address</option>
+            <option value="0"${s.reportVisitorIp === false ? ' selected' : ''}>off — log only what arrives at this server</option>
+          </select>
+          <p class="tinies" style="margin:6px 0 0">
+            Behind a router, a container network or a proxy that rewrites addresses, the address this server
+            receives belongs to the middlebox — <span class="mono">172.17.x.x</span>,
+            <span class="mono">169.254.x.x</span>, <span class="mono">192.168.x.x</span>. Nothing the server can
+            read recovers the visitor&rsquo;s own address, so when this is on and the address looks private, the
+            page asks the browser to look up the address the world sees it from
+            (<span class="mono">${esc((s.publicIpEndpoints && s.publicIpEndpoints.length ? s.publicIpEndpoints : ['https://ipwho.is/']).join(' '))}</span>)
+            and reports it back for that one visit. It is a third-party request made by the visitor&rsquo;s
+            browser, it happens once per page view, and it is off for every visitor when the address setting
+            above is privacy mode. Leave it off and the log will honestly say &ldquo;private&rdquo; instead.
+          </p>
           <label for="sRetention">Keep visits for (days)</label>
           <input id="sRetention" type="number" min="1" max="3650" value="${s.retentionDays}">
 
@@ -980,6 +1025,8 @@ sudo meow-translator backup      # snapshot the data directory</pre>
         body: {
           storeRawIp: $('#sRawIp').value === '1',
           geoLookup: $('#sGeo').value === '1',
+          reportVisitorIp: $('#sReportIp').value === '1',
+          trustProxy: $('#sTrust').value,
           retentionDays: Number($('#sRetention').value),
           autoCheckUpdates: $('#sAutoCheck').value === '1',
           autoInstallUpdates: $('#sAutoInstall').value === '1',

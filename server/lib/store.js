@@ -31,6 +31,11 @@ function freshStore() {
       storeRawIp: true,          // false -> keep a salted hash only (privacy mode)
       retentionDays: 90,
       geoLookup: true,
+      /* When the address arriving at this server is private (a router, a
+         container network, a rewriting proxy), the visitor's browser is asked
+         for the address the world sees it from. See lib/clientip.js. */
+      reportVisitorIp: true,
+      publicIpEndpoints: [],     // empty -> the built-in list; edit in the panel
       autoCheckUpdates: true,
       autoInstallUpdates: false,
       updateChannel: 'main',     // branch name in the GitHub repo

@@ -324,9 +324,9 @@ if [ -f "$CONF_DIR/config.json" ]; then
 fi
 # Keep a trustProxy setting from a previous install unless nginx is being set up
 # now: re-running the installer must not silently stop logging real visitor IPs.
-EXISTING_TRUST="$(grep -o '"trustProxy"[[:space:]]*:[[:space:]]*\(true\|false\)' "$CONF_DIR/config.json" 2>/dev/null \
-  | grep -o 'true\|false' | head -1 || true)"
-TRUST_PROXY="${EXISTING_TRUST:-false}"
+EXISTING_TRUST="$(grep -o '"trustProxy"[[:space:]]*:[[:space:]]*\(true\|false\|"auto"\)' "$CONF_DIR/config.json" 2>/dev/null \
+  | grep -o 'true\|false\|"auto"' | head -1 || true)"
+TRUST_PROXY="${EXISTING_TRUST:-\"auto\"}"
 [ "$WITH_NGINX" = 1 ] && TRUST_PROXY=true
 cat > "$CONF_DIR/config.json" <<JSON
 {
@@ -536,7 +536,9 @@ if [ "$HOST" = "0.0.0.0" ]; then
   domain at this box and run:
       sudo meow-translator setup-https your.domain.com you@example.com
   That installs nginx + Let's Encrypt, serves the app on 443, redirects $PORT
-  to it, and records real visitor addresses. Keep trustProxy=false until then.
+  to it, and records real visitor addresses. Until then the visitor's own address
+  is only knowable when the browser reports it (see the admin panel's privacy
+  settings) — a plain port-80 server behind a router cannot see it any other way.
 
 EXPOSED
 fi

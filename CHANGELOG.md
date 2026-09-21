@@ -1,5 +1,51 @@
 # Changelog
 
+## 1.0.13
+
+- **The visit log now shows the visitor's own address, and says how it knows.** A server can see the
+  socket and any forwarding headers, and nothing else; behind a router or a container network the
+  address it sees belongs to the middlebox. So the address is now resolved with its provenance, and
+  the panel shows which case a row is:
+  - **Forwarding headers** (`CF-Connecting-IP`, `True-Client-IP`, `X-Real-IP`, `X-Forwarded-For`,
+    `Forwarded`, Vercel, Fastly) are believed only when the request arrived from something trusted.
+    `trustProxy` defaults to `auto`: headers are honoured for a loopback or private-network peer — a
+    proxy on this machine or the LAN — and ignored for a direct connection from the internet, which
+    is what stops a visitor from writing their own address. `on` trusts them from anywhere, `off`
+    ignores them; the Settings tab writes the choice to `config.json`.
+  - **A private address is never geolocated.** Asking a provider about `192.168.1.5` returns that
+    provider's guess about a network that is not on the internet. The visit is marked private
+    instead, and the location column waits for a real address.
+  - **When the address we can see is private, the browser is asked.** The page is served with a
+    one-time `meow_visit` nonce (HttpOnly, `SameSite=Lax`, 15 minutes) and asks a public service what
+    address the world sees it from, then reports it to `POST /api/visit/ip`. The server accepts it
+    once, for that nonce only, and only for a real routable public address — private, loopback,
+    link-local, multicast and documentation ranges are refused. The row then carries the reported
+    address, its location, and what the server saw first beside it.
+  - Both halves have switches: the report on/off (`reportVisitorIp`, forced off in privacy mode) and
+    the lookup endpoints (`publicIpEndpoints`, for running your own). With the report off the page
+    asks nobody. Day-level unique counts follow the corrected address, so one visitor behind a router
+    counts once, not once per middlebox address.
+  - `tools/test-server.mjs` covers it: header trust with and without a local proxy, CIDR ranges, the
+    private/public split, report validation, nonce single-use and expiry, and the panel's switch
+    writing through to the config file (126 checks, from 83).
+
+- **The Translate button no longer has a way to look dead.** It does work — but if anything inside
+  the click handler throws, the browser keeps the exception to itself and the button simply appears
+  broken. The concrete case was `new AudioContext()`: on a browser or webview without Web Audio that
+  throws, and because it was the first thing the handler did, not even the meow text appeared. Now:
+  - **Audio is optional.** Synthesis never needed a context; when there is none the samples are still
+    produced (standalone `AudioBuffer`, or the waveform and text alone), and the page says which part
+    is missing rather than going quiet.
+  - **Translate plays the meow**, with the chips highlighting as it progresses — the button now does
+    the thing it is named after, instead of only producing text.
+  - **Every handler reports failure.** A throw is caught by a guard, shown in a strip at the top of
+    the page with a one-tap "Copy details", and included in `MEOW_APP.diagnostics()` along with the
+    user agent, the Web Audio status and a test encode.
+  - **Empty or unknown input says so**: a hint under the buttons rather than a card that looks like a
+    result.
+  - `tools/test-ui.mjs` now boots the page twice — once with Web Audio and once without — and asserts
+    that the button still translates, explains itself and throws nothing (92 checks, from 71).
+
 ## 1.0.12
 
 - **The installer fetches its unpacking reader from two independent sources.** It takes

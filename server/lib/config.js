@@ -20,7 +20,16 @@ const DEFAULTS = {
   appDir: '/opt/meow-translator', // code + the single-file app; replaced by updates
   dataDir: '/var/lib/meow-translator', // store.json, backups, update staging — never touched by updates
   configPath: '/etc/meow-translator/config.json',
-  trustProxy: false,              // true when nginx sets X-Forwarded-For / X-Forwarded-Proto
+  /* Who may speak for the visitor:
+       'auto'  — believe the forwarding headers only when the request came from
+                 loopback or a private address, i.e. a proxy on this machine or
+                 the LAN. A direct connection from the internet is never trusted,
+                 so the headers cannot be forged by a visitor.
+       true    — believe them from anywhere (put the app behind a proxy you trust)
+       false   — ignore them entirely and log the socket address
+     The headers are what tell us the visitor's real address behind nginx,
+     Cloudflare, or a container network. */
+  trustProxy: 'auto',
   restartMode: 'auto',            // auto | systemd | exec  (see lib/restart.js)
   sessionHours: 12,
   maxVisitRows: 50000,            // hard cap on stored visit rows, oldest dropped first
@@ -55,14 +64,21 @@ function load(argv) {
   if (env.MEOW_PORT) cfg.port = Number(env.MEOW_PORT);
   if (env.MEOW_APP_DIR) cfg.appDir = env.MEOW_APP_DIR;
   if (env.MEOW_DATA_DIR) cfg.dataDir = env.MEOW_DATA_DIR;
-  if (env.MEOW_TRUST_PROXY) cfg.trustProxy = env.MEOW_TRUST_PROXY === '1' || env.MEOW_TRUST_PROXY === 'true';
+  if (env.MEOW_TRUST_PROXY) {
+    const raw = String(env.MEOW_TRUST_PROXY).toLowerCase();
+    cfg.trustProxy = raw === 'auto' ? 'auto' : (raw === '1' || raw === 'true');
+  }
   if (env.MEOW_RESTART_MODE) cfg.restartMode = env.MEOW_RESTART_MODE;
 
   if (cli.host) cfg.host = cli.host;
   if (cli.port) cfg.port = Number(cli.port);
+  if (cli.trustedProxies) cfg.trustedProxies = String(cli.trustedProxies).split(',').map(x => x.trim()).filter(Boolean);
   if (cli.appDir) cfg.appDir = cli.appDir;
   if (cli.dataDir) cfg.dataDir = cli.dataDir;
-  if (cli.trustProxy !== undefined) cfg.trustProxy = cli.trustProxy === true || cli.trustProxy === 'true';
+  if (cli.trustProxy !== undefined) {
+    const raw = String(cli.trustProxy).toLowerCase();
+    cfg.trustProxy = raw === 'auto' ? 'auto' : (cli.trustProxy === true || raw === 'true');
+  }
   if (cli.restartMode) cfg.restartMode = cli.restartMode;
 
   cfg.port = Math.max(1, Math.min(65535, Number(cfg.port) || DEFAULTS.port));

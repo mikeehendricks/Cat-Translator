@@ -698,6 +698,12 @@ footer {
 .vnote { font-size: var(--t-caption1); }
 .vnote a { font-weight: 600; }
 
+#problemStrip { margin: 0 0 1rem; }
+#problemStrip .btn { margin-left: auto; }
+#problemStrip.warn { border-color: color-mix(in srgb, var(--orange) 40%, transparent); }
+#encodeNote { margin: .375rem 0 .75rem; }
+#encodeNote.warn { color: var(--orange); }
+
 /* While the microphone is open the button changes shape and wording, so the
    state is readable without relying on the colour alone. */
 #recordBtn.is-recording {
@@ -815,6 +821,7 @@ footer {
   </defs>
 </svg>
 
+<!--__MEOW_RUNTIME__-->
 
 <!-- ───────────────────────────── chrome bar ──────────────────────────── -->
 <header class="nav" id="nav">
@@ -849,6 +856,9 @@ footer {
     <span>Loading the meow codec…</span>
   </div>
 
+  <!-- Shown only when something actually fails; the app never fails silently. -->
+  <div id="problemStrip" class="notice hidden" role="alert"></div>
+
   <!-- direction: compact widths switch panes, wide widths show both -->
   <div class="segmented direction" role="radiogroup" aria-label="Translation direction">
     <button class="segmented__item" role="radio" aria-checked="true" data-pane="A" type="button">
@@ -878,6 +888,8 @@ footer {
       </div>
       <p class="caption secondary" id="examples-hint" style="margin-bottom:.375rem">Try one of these:</p>
       <div class="tags" id="examples"></div>
+
+      <p class="footnote secondary hidden" id="encodeNote" role="status" aria-live="polite"></p>
 
       <div class="row">
         <button class="btn btn--filled" id="translateBtn" type="button">
@@ -965,7 +977,7 @@ footer {
   <footer>
     <div>meow codec · 538 words / 111 word meanings, 122 distinct meows · synthesis and recognition run entirely in your browser</div>
     <div class="versionline">
-      <span class="vbadge" id="appVersion">version 1.0.12</span>
+      <span class="vbadge" id="appVersion">version 1.0.13</span>
       <span id="updateNote" class="vnote"></span>
     </div>
   </footer>
@@ -2598,39 +2610,135 @@ globalThis.MEOW_TEMPLATES = {"sr":22050,"features":["c0","c1","c2","c3","c4","f0
     presets: [],
     analyser: null,
     rafId: 0,
+    problems: [],
   };
 
+  /* ---------------------------------------------------------------- problems */
+  /**
+   * Say something when the app cannot do what was asked.
+   *
+   * An exception thrown inside a click handler is invisible: the button simply
+   * does nothing, which is indistinguishable from a broken page. Every failure
+   * that can happen while the app is running ends up here, in the strip above
+   * the panes, with the words that describe it and a copyable diagnostic line —
+   * so "it does nothing" can be reported as something specific.
+   */
+  function reportProblem(what, err) {
+    const text = (err && (err.message || String(err))) || 'unknown error';
+    state.problems.push({ what, text, at: Date.now() });
+    const strip = $('#problemStrip');
+    if (!strip) return;
+    strip.classList.remove('hidden');
+    strip.classList.toggle('notice--warn', true);
+    strip.innerHTML = `${SYM('i-warning')}<span><b>${what}</b> — ${text}</span>` +
+      `<button type="button" class="btn btn--plain btn--small" id="problemCopy">Copy details</button>`;
+    const copy = $('#problemCopy');
+    if (copy) copy.onclick = () => {
+      const line = diagnostics();
+      if (navigator.clipboard) navigator.clipboard.writeText(line).then(() => { copy.textContent = 'Copied'; });
+    };
+  }
+
+  function diagnostics() {
+    const lines = [
+      'Cat Translator diagnostics',
+      'time        ' + new Date().toISOString(),
+      'url         ' + (g.location ? g.location.href : '(none)'),
+      'user agent  ' + (navigator.userAgent || 'unknown'),
+      'web audio   ' + (audioUnavailable() ? 'unavailable: ' + audioUnavailable() : 'available'),
+      'mediaDevices ' + (navigator.mediaDevices && navigator.mediaDevices.getUserMedia ? 'yes' : 'no'),
+      'dialog      ' + (typeof g.HTMLDialogElement !== 'undefined' && g.HTMLDialogElement.prototype.showModal ? 'yes' : 'no'),
+      'text styles ' + (g.CSS && CSS.supports && CSS.supports('color', 'color-mix(in srgb, red, blue)') ? 'color-mix yes' : 'color-mix no'),
+      'encode test ' + (function () {
+        try { const e = MEOW_ENGINE.encode('i love you so much'); return e.tokens.length + ' meows, "' + e.meow + '"'; }
+        catch (err) { return 'FAILED: ' + (err.message || err); }
+      })(),
+      'problems    ' + (state.problems.length ? state.problems.map(p => p.what + ': ' + p.text).join(' | ') : 'none'),
+    ];
+    return lines.join('\n');
+  }
+
+  /** Run a handler so that a throw becomes a visible message, never silence. */
+  function guard(what, fn) {
+    return function () {
+      try { return fn.apply(this, arguments); }
+      catch (err) { reportProblem(what, err); return undefined; }
+    };
+  }
+
   /* ------------------------------------------------------------------ audio */
+  /**
+   * The audio context, or null when this browser cannot give us one.
+   *
+   * It is created on first use, inside a click, and every failure short of a
+   * working context is answered with null rather than an exception: a browser
+   * without Web Audio, a privacy mode that refuses to start one, a webview whose
+   * audio service is missing. Synthesis and the waveform do not need a context
+   * at all, so a browser like that can still translate and draw — it just cannot
+   * play, and it says so instead of doing nothing.
+   */
   let ctx = null;
+  let audioError = null;
   function audio() {
-    if (!ctx) {
-      const AC = g.AudioContext || g.webkitAudioContext;
+    if (ctx) {
+      if (ctx.state === 'suspended') { try { ctx.resume(); } catch (e) { /* still usable */ } }
+      return ctx;
+    }
+    const AC = g.AudioContext || g.webkitAudioContext;
+    if (typeof AC !== 'function') { audioError = new Error('this browser has no Web Audio'); return null; }
+    try {
       ctx = new AC();
       state.master = ctx.createGain();
       state.master.gain.value = 0.9;
       state.master.connect(ctx.destination);
+    } catch (err) {
+      audioError = err;
+      ctx = null;
+      return null;
     }
-    if (ctx.state === 'suspended') ctx.resume();
+    if (ctx.state === 'suspended') { try { ctx.resume(); } catch (e) { /* the click that got us here counts as a gesture */ } }
     return ctx;
   }
+  const audioUnavailable = () => audioError ? (audioError.message || String(audioError)) : null;
 
-  /** Synthesise tokens at the canonical rate and hand back an AudioBuffer. */
+  /**
+   * Synthesise tokens at the canonical rate and hand back something buffer-like.
+   *
+   * The samples are ours either way. A context is only needed to *hold* them for
+   * playback, and if there is no context we still try the standalone AudioBuffer
+   * so the waveform, the clock and the read-back keep working — the one thing
+   * lost is the sound itself. Returning null is a normal outcome, not an error:
+   * every caller already checks.
+   */
   function bufferForTokens(tokens, voice) {
-    const c = audio();
     const sr = g.MEOW_MATCH.SR0;
     const descs = MEOW_ENGINE.describeTokens(tokens, voice);
     if (!descs.length) return null;
     const samples = MEOW_SYNTH.renderUtterance(descs, {
       sr, gap: 0.075, voicePitch: 1, voiceSpeed: 1,
     });
-    const buf = c.createBuffer(1, samples.length, sr);
-    buf.copyToChannel(samples, 0);
-    return buf;
+    const c = audio();
+    if (c) {
+      try {
+        const buf = c.createBuffer(1, samples.length, sr);
+        buf.copyToChannel(samples, 0);
+        return buf;
+      } catch (err) { audioError = err; }
+    }
+    if (typeof g.AudioBuffer === 'function') {
+      try {
+        const buf = new g.AudioBuffer({ length: samples.length, sampleRate: sr, numberOfChannels: 1 });
+        buf.copyToChannel(samples, 0);
+        return buf;
+      } catch (err) { /* not offered without a context either */ }
+    }
+    return null;
   }
 
   function playBuffer(buf, onProgress) {
     stopPlayback();
     const c = audio();
+    if (!c) return false;
     const src = c.createBufferSource();
     src.buffer = buf;
     const gain = c.createGain();
@@ -3017,16 +3125,16 @@ globalThis.MEOW_TEMPLATES = {"sr":22050,"features":["c0","c1","c2","c3","c4","f0
       const b = doc.el.createElement('button');
       b.className = 'tag';
       b.textContent = ex;
-      b.onclick = () => { $('#englishIn').value = ex; doEncode(); };
+      b.onclick = () => { $('#englishIn').value = ex; guard('Translation failed', doEncode)(); };
       box.appendChild(b);
     });
 
     buildPresets();
-    $('#translateBtn').onclick = doEncode;
-    $('#englishIn').addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) doEncode(); });
-    $('#recordBtn').onclick = () => (state.recording ? stopRecording() : startRecording());
-    $('#selfTest').onclick = selfTest;
-    $('#stopBtn').onclick = () => { stopPlayback(); };
+    $('#translateBtn').onclick = guard('Translation failed', doEncode);
+    $('#englishIn').addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) guard('Translation failed', doEncode)(); });
+    $('#recordBtn').onclick = guard('Recording failed', () => (state.recording ? stopRecording() : startRecording()));
+    $('#selfTest').onclick = guard('Read-back failed', selfTest);
+    $('#stopBtn').onclick = guard('Stopping the audio failed', () => { stopPlayback(); });
 
     const vp = $('#voicePitch'), vs = $('#voiceSpeed'), vg = $('#voiceGruff');
     const syncVoice = () => {
@@ -3047,8 +3155,92 @@ globalThis.MEOW_TEMPLATES = {"sr":22050,"features":["c0","c1","c2","c3","c4","f0
     initChrome();
 
     drawLevel(0);
-    doEncode();
+    guard('Starting up failed', doEncode)();
     $('#bootNotice').classList.add('hidden');
+    reportVisitorAddress();
+
+    /* Anything that escapes a handler from anywhere else still gets said out
+       loud rather than swallowed by the console. */
+    g.addEventListener('error', (e) => {
+      if (e && e.message) reportProblem('Something went wrong', e.error || e.message);
+    });
+    g.addEventListener('unhandledrejection', (e) => {
+      const reason = e && e.reason;
+      reportProblem('Something went wrong', reason || 'unhandled rejection');
+    });
+  }
+
+  /* -------------------------------------------------------- visitor address */
+  /**
+   * Tell the server which public address this browser has, when the server says
+   * it cannot see one.
+   *
+   * Behind a router, a container network or a proxy that rewrites addresses, the
+   * address the server receives belongs to the middlebox, and no amount of
+   * header reading recovers the visitor's own. The browser is the only party
+   * that can find out: it asks a public "what is my address?" service and sends
+   * the answer back to the page's own origin. The server decides whether to ask
+   * (it says so in the runtime config), names the services to use, and accepts
+   * only a real public address — so the bundle itself knows nothing about any
+   * outside service, works offline, and does none of this when opened from disk.
+   *
+   * Runs once per page, quietly, and every failure is ignored: this is a
+   * best-effort improvement to a stat, and it must never disturb the app.
+   */
+  function reportVisitorAddress() {
+    const box = doc.el.getElementById('meow-runtime');
+    if (!box || !g.location || /^file:/.test(g.location.protocol)) return;
+    let cfg = null;
+    try { cfg = JSON.parse(box.textContent || '{}'); } catch (e) { cfg = null; }
+    if (!cfg || !cfg.report || !cfg.post || !Array.isArray(cfg.endpoints) || !cfg.endpoints.length) return;
+    if (!g.fetch) return;
+
+    const askOnce = (url, timeoutMs) => new Promise((resolve) => {
+      let done = false;
+      const finish = (value) => { if (!done) { done = true; resolve(value); } };
+      const timer = g.setTimeout(() => finish(null), timeoutMs);
+      try {
+        const ctl = typeof AbortController === 'function' ? new AbortController() : null;
+        if (ctl) g.setTimeout(() => { try { ctl.abort(); } catch (e) {} }, timeoutMs);
+        g.fetch(url, { mode: 'cors', credentials: 'omit', cache: 'no-store', signal: ctl && ctl.signal })
+          .then(r => (r.ok ? r.json() : null))
+          .then(j => {
+            g.clearTimeout(timer);
+            /* providers disagree on the field name; take the first that looks
+               like an address */
+            const guess = j && (j.ip || j.query || j.address || (j.ip_address) ||
+              (j.ipv4 && j.ipv4.address) || (typeof j === 'string' ? j : null));
+            finish(typeof guess === 'string' && guess.length <= 64 ? guess : null);
+          })
+          .catch(() => { g.clearTimeout(timer); finish(null); });
+      } catch (err) { g.clearTimeout(timer); finish(null); }
+    });
+
+    const step = (i) => {
+      if (i >= cfg.endpoints.length) return;
+      askOnce(cfg.endpoints[i], 6000).then((ip) => {
+        if (!ip) return step(i + 1);
+        const post = (body) => g.fetch(cfg.post, {
+          method: 'POST',
+          mode: 'same-origin',
+          credentials: 'same-origin',
+          cache: 'no-store',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+        }).catch(() => null);
+        const body = { ip: ip, source: 'browser' };
+        /* the modern API answers both families at once; prefer the v4 address
+           when a provider hands one over, because geolocation for it is far more
+           reliable than for a v6 allocation */
+        post(body).then((res) => {
+          if (res && res.ok) return;
+          if (body.ip4 && body.ip !== body.ip4) return post({ ip: body.ip4, source: 'browser' });
+          return null;
+        }).catch(() => {});
+      }).catch(() => {});
+    };
+    /* never in the way of the first paint */
+    g.setTimeout(() => { try { step(0); } catch (e) { /* a stat is not worth an error */ } }, 1200);
   }
 
   /**
@@ -3101,20 +3293,51 @@ globalThis.MEOW_TEMPLATES = {"sr":22050,"features":["c0","c1","c2","c3","c4","f0
 
   function doEncode() {
     const text = $('#englishIn').value;
+    if (!text.trim()) {
+      note('Type a sentence first — or tap one of the examples above.');
+      renderMeowCard(MEOW_ENGINE.encode(''));
+      return;
+    }
     const enc = MEOW_ENGINE.encode(text);
     const chips = renderMeowCard(enc);
     state.lastEnc = enc;
-    if (enc.tokens.length) {
-      const buf = bufferForTokens(enc.tokens, state.voice);
-      state.lastBuffer = buf;
-      state.lastBufferTokens = enc.tokens;
-      checkSelfTest();
-      drawWave(buf);
-      chips.length;                             // chips animate when it speaks
+    if (!enc.tokens.length) {
+      note('None of those words are in the meow lexicon yet — no meow was made.');
+      return;
+    }
+    note('');
+    const buf = bufferForTokens(enc.tokens, state.voice);
+    state.lastBuffer = buf;
+    state.lastBufferTokens = enc.tokens;
+    checkSelfTest();
+    drawWave(buf);
+    /* Pressing Translate is a gesture, and the point of the button is to hear
+       the cat: speak it here rather than making the reader find a second button.
+       If this browser will not play audio, say that instead of going quiet. */
+    if (buf) {
+      const played = playBuffer(buf, (p) => {
+        const n = chips.length;
+        if (!n) return;
+        const idx = Math.min(n - 1, Math.floor(p * n));
+        chips.forEach((c, i) => c.classList.toggle('active', i === idx));
+        if (p >= 1) chips.forEach(c => c.classList.remove('active'));
+      });
+      if (played === false) note('This browser will not play audio, but the meow text above is yours.', true);
+    } else {
+      note('Audio is unavailable in this browser (' + (audioUnavailable() || 'no Web Audio') + '). The meow text above is still correct.', true);
     }
   }
 
-  g.MEOW_APP = { init, state, bufferForTokens, recognise, playBuffer };
+  /** One line of feedback directly under the buttons. */
+  function note(text, warn) {
+    const el = $('#encodeNote');
+    if (!el) return;
+    el.textContent = text || '';
+    el.classList.toggle('hidden', !text);
+    el.classList.toggle('warn', !!warn);
+  }
+
+  g.MEOW_APP = { init, state, bufferForTokens, recognise, playBuffer, diagnostics, reportProblem };
 })(typeof globalThis !== 'undefined' ? globalThis : window);
 
 </script>

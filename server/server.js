@@ -30,6 +30,7 @@ const config = require('./lib/config');
 const { Store } = require('./lib/store');
 const auth = require('./lib/auth');
 const { Geo, normaliseIp, isPrivateIp } = require('./lib/geo');
+const clientip = require('./lib/clientip');
 const stats = require('./lib/stats');
 const restart = require('./lib/restart');
 const { Updater, sha8, dirSize } = require('./lib/updater');
@@ -52,19 +53,12 @@ function log(level, msg) {
 
 /* ------------------------------------------------------------------ plumbing */
 
+/**
+ * The visitor's address, with its provenance. All of the judgement lives in
+ * lib/clientip.js; this is the plumbing that hands it the request.
+ */
 function clientIp(req) {
-  if (cfg.trustProxy) {
-    const xff = req.headers['x-forwarded-for'];
-    if (xff) {
-      /* the LAST hop is the one our proxy appended; earlier entries are client
-         supplied and must not be trusted */
-      const parts = String(xff).split(',').map(s => s.trim()).filter(Boolean);
-      if (parts.length) return { ip: normaliseIp(parts[parts.length - 1]), proxied: true };
-    }
-    const real = req.headers['x-real-ip'];
-    if (real) return { ip: normaliseIp(real), proxied: true };
-  }
-  return { ip: normaliseIp(req.socket.remoteAddress || ''), proxied: false };
+  return clientip.resolve(req, cfg);
 }
 
 /* ---------------------------------------------------------------------------
@@ -74,6 +68,26 @@ function clientIp(req) {
    ------------------------------------------------------------------------ */
 const DESIGN_DIR = path.join(__dirname, '..', 'design');
 const composed = new Map();
+
+/**
+ * The served copy of the app page.
+ *
+ * Identical to cat-translator.html except for one script element the server
+ * fills in: what the browser should do about the visitor's address. Composing it
+ * here rather than shipping it in the file is what keeps the file self-contained
+ * — opened from disk, there is no such element and the page does nothing about
+ * addresses, which is the only sensible behaviour when nobody is listening.
+ */
+let appPageCache = null;
+function appPage() {
+  if (appPageCache) return appPageCache;
+  const shell = fs.readFileSync(cfg.appHtml, 'utf8');
+  const runtime = `<script id="meow-runtime" type="application/json">${visitorReportConfig()}</script>`;
+  appPageCache = shell.includes('<!--__MEOW_RUNTIME__-->')
+    ? shell.replace('<!--__MEOW_RUNTIME__-->', runtime)
+    : shell;
+  return appPageCache;
+}
 
 function inlineDesign(name) {
   if (composed.has(name)) return composed.get(name);
@@ -88,6 +102,37 @@ function inlineDesign(name) {
     .replace('<!--__MEOW_SYMBOLS__-->', () => read('symbols.html', 'the symbol sprite'));
   composed.set(name, html);
   return html;
+}
+
+/** One cookie's value, or ''. */
+function cookieValue(req, name) {
+  const header = req.headers.cookie;
+  if (!header) return '';
+  for (const part of String(header).split(';')) {
+    const eq = part.indexOf('=');
+    if (eq === -1) continue;
+    if (part.slice(0, eq).trim() === name) return decodeURIComponent(part.slice(eq + 1).trim());
+  }
+  return '';
+}
+
+/** Read a small JSON body, refusing anything larger than `limit`. */
+function readJson(req, res, limit) {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    const chunks = [];
+    req.on('data', (c) => {
+      size += c.length;
+      if (size > limit) { reject(new Error('too large')); req.destroy(); return; }
+      chunks.push(c);
+    });
+    req.on('end', () => {
+      const text = Buffer.concat(chunks).toString('utf8').trim();
+      if (!text) return resolve(null);
+      try { resolve(JSON.parse(text)); } catch (e) { reject(e); }
+    });
+    req.on('error', reject);
+  });
 }
 
 function send(res, status, body, headers) {
@@ -198,6 +243,15 @@ function sessionPayload(sess) {
 
 /* ------------------------------------------------------------- visit capture */
 
+/**
+ * Record a page view, and — when the address we can see is not a public one —
+ * give the visitor's browser the chance to tell us the address it really has.
+ *
+ * The cookie is the binding: it carries a nonce that matches exactly one visit,
+ * so a report cannot be aimed at somebody else's row, and it expires by itself.
+ * Nothing about the visitor is stored in it (no address, no identifier), and the
+ * report endpoint is the only thing that reads it.
+ */
 function trackVisit(req, res, ipInfo) {
   const entry = stats.record(store, {
     ip: ipInfo.ip,
@@ -205,12 +259,69 @@ function trackVisit(req, res, ipInfo) {
     ua: req.headers['user-agent'],
     ref: req.headers.referer || req.headers.referrer || '',
     proxied: ipInfo.proxied,
+    source: ipInfo.source,
+    chain: ipInfo.chain,
   });
+
+  const resolved = { ip: ipInfo.ip, source: ipInfo.source, private: ipInfo.private };
+  if (clientip.wantsReport(resolved, store.data.settings)) {
+    const nonce = crypto.randomBytes(16).toString('base64url');
+    entry.reportNonce = nonce;
+    entry.reportState = 'asked';
+    store.dirty();
+    /* SameSite=Lax so it survives an ordinary navigation to the page, HttpOnly
+       so no script can read it, and short-lived — it exists to tie one report to
+       one visit and nothing else. */
+    res.setHeader('set-cookie',
+      `meow_visit=${nonce}; Path=/; Max-Age=900; HttpOnly; SameSite=Lax`);
+  }
+
   const cached = geo.cached(ipInfo.ip);
   if (cached) stats.attachGeo(store, entry, cached);
-  else if (store.data.settings.geoLookup) {
+  else if (store.data.settings.geoLookup && !ipInfo.private) {
+    /* A private address has no location to look up — asking a provider about
+       192.168.1.5 would come back with the provider's guess about a network
+       that is not on the internet. Wait for the visitor report instead. */
     geo.lookup(ipInfo.ip).then(g => { if (g) stats.attachGeo(store, entry, g); }).catch(() => {});
   }
+}
+
+/** Where the browser can ask what address the world sees it from. Editable in
+    the panel: an installation that would rather not use a third party can point
+    these at its own service, or turn the whole thing off. */
+function publicIpEndpoints() {
+  const fromSettings = store.data.settings.publicIpEndpoints;
+  if (Array.isArray(fromSettings) && fromSettings.length) return fromSettings.slice(0, 6);
+  return [
+    'https://ipwho.is/',
+    'https://api.ipify.org/?format=json',
+    'https://ifconfig.co/json',
+  ];
+}
+
+/**
+ * The hosts the browser will call when it asks what address the world sees it
+ * from. They have to be named in the page's Content-Security-Policy or the
+ * request is refused before it leaves the browser — a failure that looks exactly
+ * like "the report never arrived".
+ */
+function publicIpConnectSrc() {
+  const hosts = new Set();
+  for (const url of publicIpEndpoints()) {
+    try { hosts.add(new URL(url).origin); } catch (e) { /* skip a bad entry */ }
+  }
+  return Array.from(hosts).join(' ');
+}
+
+/** The report the page needs, injected where the placeholders are. */
+function visitorReportConfig() {
+  const settings = store.data.settings;
+  const enabled = settings.reportVisitorIp !== false && settings.storeRawIp !== false;
+  return JSON.stringify({
+    report: enabled,
+    post: '/api/visit/ip',
+    endpoints: enabled ? publicIpEndpoints() : [],
+  });
 }
 
 /* ------------------------------------------------------------------- routing */
@@ -256,6 +367,31 @@ async function handler(req, res) {
 
     if (req.method === 'GET' && (pathname === '/' || pathname === '/index.html' || pathname === '/app')) {
       trackVisit(req, res, ipInfo);
+      /* The page carries a placeholder for the visitor-report configuration, so
+         the bundle itself keeps no knowledge of any outside service and still
+         works when it is opened straight from disk. */
+      let page = null;
+      try { page = appPage(); } catch (err) {
+        log('warn', 'could not compose the app page: ' + err.message);
+      }
+      if (page) {
+        return send(res, 200, page, Object.assign({ 'content-type': TYPES['.html'] }, {
+          'cache-control': 'no-cache',
+          'content-security-policy': [
+            "default-src 'self'",
+            "script-src 'self' 'unsafe-inline'",
+            "style-src 'self' 'unsafe-inline'",
+            "img-src 'self' data: blob:",
+            "media-src 'self' blob: data:",
+            /* the visitor report is a same-origin POST; the lookup itself is a
+               cross-origin GET, which needs connect-src to allow those hosts */
+            "connect-src 'self' " + (store.data.settings.reportVisitorIp === false ? '' : publicIpConnectSrc()),
+            "form-action 'none'",
+            "base-uri 'none'",
+            cfg.strictFrames ? "frame-ancestors 'none'" : "frame-ancestors *",
+          ].join('; '),
+        }));
+      }
       return serveFile(res, cfg.appHtml, TYPES['.html'], {
         'cache-control': 'no-cache',
         /* The app is a self-contained page: it needs inline script/style, blob:
@@ -281,6 +417,51 @@ async function handler(req, res) {
       const full = path.join(cfg.appDir, rel);
       if (!full.startsWith(path.join(cfg.appDir, 'audio'))) return send(res, 403, 'forbidden\n');
       return serveFile(res, full, TYPES[path.extname(full)] || 'application/octet-stream', { 'cache-control': 'public, max-age=3600' });
+    }
+
+    /* -------------------------------------------------------- visitor report */
+    /**
+     * The visitor's browser says which public address it has. Only accepted when
+     * it matches the visit that asked (the nonce cookie), only for a real public
+     * address, and only once — after that the visit row shows a WAN address and
+     * a location looked up from it.
+     */
+    if (req.method === 'POST' && pathname === '/api/visit/ip') {
+      const nonce = cookieValue(req, 'meow_visit');
+      if (!nonce) return json(res, 400, { error: 'no visit to report for — reload the page' });
+      const visit = stats.byReportNonce(store, nonce);
+      if (!visit) return json(res, 404, { error: 'that visit has expired; reload the page' });
+      /* The switch can be flipped after a page was served, so it is checked
+         again here rather than only where the page was composed. */
+      if (store.data.settings.reportVisitorIp === false || store.data.settings.storeRawIp === false) {
+        return json(res, 403, { error: 'visitor address reporting is switched off on this installation' });
+      }
+      readJson(req, res, 4096).then((body) => {
+        const check = clientip.validateReported(body && body.ip);
+        if (!check.ok) {
+          visit.reportState = 'rejected';
+          visit.reportNote = check.reason;
+          store.dirty();
+          return json(res, 400, { error: 'not a usable address: ' + check.reason });
+        }
+        if (!visit.socketIp) visit.socketIp = visit.ip;      // keep what we saw
+        visit.ip = check.ip;
+        visit.reportedIp = check.ip;
+        visit.source = 'reported';
+        visit.private = false;
+        visit.reportState = 'accepted';
+        stats.rehash(store, visit, check.ip);
+        visit.reportedAt = Date.now();
+        visit.reportNonce = null;                 // single use
+        store.audit('visitor', 'ip-report', `${check.ip} for visit ${visit.t}`, '');
+        store.dirty();
+        /* now that there is something real to look up, resolve its location */
+        if (store.data.settings.geoLookup) {
+          geo.lookup(check.ip).then(g => { if (g) stats.attachGeo(store, visit, g); }).catch(() => {});
+        }
+        return json(res, 200, { ok: true });
+      }).catch(() => json(res, 400, { error: 'bad request body' }));
+      return;
     }
 
     /* ----------------------------------------------------------------- admin */
@@ -437,6 +618,8 @@ async function adminApi(req, res, route, ipInfo) {
         host: cfg.host,
         port: cfg.port,
         trustProxy: cfg.trustProxy,
+        trustedProxies: cfg.trustedProxies || [],
+        reportVisitorIp: store.data.settings.reportVisitorIp !== false,
         versionsDirBytes: (() => { try { return dirSize(cfg.versionsDir); } catch (e) { return 0; } })(),
       },
       stats: summary,
@@ -594,6 +777,22 @@ async function adminApi(req, res, route, ipInfo) {
     const before = JSON.stringify(s);
     if (body.storeRawIp !== undefined) s.storeRawIp = !!body.storeRawIp;
     if (body.geoLookup !== undefined) s.geoLookup = !!body.geoLookup;
+    if (body.reportVisitorIp !== undefined) s.reportVisitorIp = !!body.reportVisitorIp;
+    if (body.trustProxy !== undefined) {
+      const raw = String(body.trustProxy).toLowerCase();
+      if (raw === 'auto') cfg.trustProxy = 'auto';
+      else if (raw === '1' || raw === 'true') cfg.trustProxy = true;
+      else cfg.trustProxy = false;
+      persistTrustProxy(cfg.trustProxy);
+    }
+    appPageCache = null;              // the page carries this configuration
+    if (body.publicIpEndpoints !== undefined) {
+      const list = Array.isArray(body.publicIpEndpoints) ? body.publicIpEndpoints : [];
+      s.publicIpEndpoints = list
+        .map(u => String(u).trim())
+        .filter(u => /^https?:\/\//i.test(u) && u.length < 300)
+        .slice(0, 6);
+    }
     if (body.autoCheckUpdates !== undefined) s.autoCheckUpdates = !!body.autoCheckUpdates;
     if (body.autoInstallUpdates !== undefined) s.autoInstallUpdates = !!body.autoInstallUpdates;
     if (body.retentionDays !== undefined) s.retentionDays = Math.max(1, Math.min(3650, Number(body.retentionDays) || 90));
@@ -623,7 +822,10 @@ async function adminApi(req, res, route, ipInfo) {
 }
 
 function isSecure(req) {
-  if (cfg.trustProxy && String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() === 'https') return true;
+  const forwardProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase();
+  const protoTrusted = cfg.trustProxy === true ||
+    (cfg.trustProxy === 'auto' && clientip.peerIsTrusted(normaliseIp(req.socket.remoteAddress || ''), cfg));
+  if (protoTrusted && forwardProto === 'https') return true;
   return !!(req.socket.encrypted);
 }
 
@@ -633,6 +835,9 @@ function publicSettings() {
     storeRawIp: s.storeRawIp,
     retentionDays: s.retentionDays,
     geoLookup: s.geoLookup,
+    reportVisitorIp: s.reportVisitorIp !== false,
+    publicIpEndpoints: s.publicIpEndpoints || [],
+    trustProxy: cfg.trustProxy,
     autoCheckUpdates: s.autoCheckUpdates,
     autoInstallUpdates: s.autoInstallUpdates,
     updateChannel: s.updateChannel,
@@ -640,6 +845,22 @@ function publicSettings() {
     githubToken: s.githubToken ? '***' : '',
     publicBaseUrl: s.publicBaseUrl,
   };
+}
+
+/**
+ * Remember a trustProxy change in the config file, so it survives a restart —
+ * the setting lives in the config, not the store, because it is about the
+ * network the process is listening on.
+ */
+function persistTrustProxy(value) {
+  try {
+    const raw = JSON.parse(fs.readFileSync(cfg.configPath, 'utf8'));
+    raw.trustProxy = value;
+    fs.writeFileSync(cfg.configPath, JSON.stringify(raw, null, 2) + '\n', { mode: 0o640 });
+    log('info', `trustProxy set to ${JSON.stringify(value)} in ${cfg.configPath}`);
+  } catch (err) {
+    log('warn', `could not write trustProxy to ${cfg.configPath}: ${err.message}`);
+  }
 }
 
 function diffKeys(a, b) {

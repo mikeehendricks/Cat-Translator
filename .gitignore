@@ -4,6 +4,8 @@ data/
 node_modules/
 .npm/
 .cache/
+.local/
+.config/
 .arena/
 dist/
 build/

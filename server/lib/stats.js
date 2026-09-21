@@ -35,7 +35,7 @@ function dayKey(t) {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
-function record(store, { ip, path, ua, ref, proxied }) {
+function record(store, { ip, path, ua, ref, proxied, source, chain }) {
   const clean = normaliseIp(ip);
   const t = Date.now();
   const device = deviceOf(ua);
@@ -51,6 +51,11 @@ function record(store, { ip, path, ua, ref, proxied }) {
     device,
     geo,
     proxied: !!proxied,
+    /* where the address came from, so the panel can show provenance rather than
+       presenting a proxy's address as if it were the visitor's */
+    source: String(source || (proxied ? 'proxy' : 'socket')).slice(0, 40),
+    private: isPrivateIp(clean),
+    chain: Array.isArray(chain) ? chain.slice(0, 8) : undefined,
   };
   store.data.visits.push(entry);
   if (store.data.visits.length > 60000) store.data.visits.splice(0, store.data.visits.length - 60000);
@@ -64,6 +69,47 @@ function record(store, { ip, path, ua, ref, proxied }) {
 
   store.dirty();
   return entry;
+}
+
+/**
+ * The visit that asked to be told about, found by the nonce in its cookie.
+ * Only visits young enough for their cookie to still be alive are eligible, and
+ * a nonce is cleared the moment it is used.
+ */
+function byReportNonce(store, nonce) {
+  if (!nonce || typeof nonce !== 'string' || nonce.length < 10) return null;
+  const cutoff = Date.now() - 900000;              // the cookie's own lifetime
+  const visits = store.data.visits;
+  for (let i = visits.length - 1; i >= 0; i--) {
+    const v = visits[i];
+    if (v.t < cutoff) break;
+    if (v.reportNonce && v.reportNonce === nonce) return v;
+  }
+  return null;
+}
+
+/**
+ * Re-key a visit's visitor hash after its address has been replaced.
+ *
+ * The hash is what "unique visitor" counts: leaving it keyed to the private
+ * address that a router handed us would count the same person once per middlebox
+ * address, and dropping it would count them again. So the old key is retired and
+ * the new one taken, in place, for the day the visit happened.
+ */
+function rehash(store, entry, newIp) {
+  if (!entry) return;
+  const next = visitorHash(normaliseIp(newIp), entry.ua);
+  if (next === entry.hash) return;
+  const day = store.data.dayStats[dayKey(entry.t)];
+  if (day && day.seen) {
+    if (entry.hash && day.seen[entry.hash]) {
+      delete day.seen[entry.hash];
+      day.uniques = Math.max(0, (day.uniques || 1) - 1);
+    }
+    if (!day.seen[next]) { day.seen[next] = 1; day.uniques = (day.uniques || 0) + 1; }
+  }
+  entry.hash = next;
+  store.dirty();
 }
 
 /** Attach the resolved location to the visit row and to the day counters. */
@@ -188,4 +234,7 @@ function csv(rows) {
   return lines.join('\n') + '\n';
 }
 
-module.exports = { record, attachGeo, summarize, query, csv, deviceOf, browserOf, dayKey, visitorHash, isPrivateIp };
+module.exports = {
+  record, attachGeo, byReportNonce, rehash, summarize, query, csv,
+  deviceOf, browserOf, dayKey, visitorHash, isPrivateIp,
+};

@@ -100,7 +100,7 @@ about exposure; the app itself is identical.
    |---|---|---|
    | `/opt/meow-translator` | application code | yes |
    | `/var/lib/meow-translator` | store (visits, credentials, settings), version snapshots | **no** |
-   | `/etc/meow-translator` | `config.json` (host, port, proxy trust) | **no** |
+   | `/etc/meow-translator` | `config.json` (host, port, proxy trust, session length) | **no** |
 
 4. Installs and starts the systemd unit `meow-translator.service`:
 
@@ -112,7 +112,8 @@ about exposure; the app itself is identical.
    ```
 
 5. Optionally installs nginx + certbot in front (with `X-Forwarded-For`, so the visit log records
-   real visitor addresses), and flips `trustProxy` on.
+   real visitor addresses), and flips `trustProxy` to `on`. Without nginx it is written as `"auto"`,
+   which trusts those headers only when the request comes from a local proxy.
 6. Prints the URL and the setup token.
 
 Re-running the installer is safe and idempotent: it upgrades the code and the unit and leaves the
@@ -131,9 +132,10 @@ scrypt (N=16384, r=8, p=1) and never stored in any recoverable form.
 |---|---|
 | **Overview** | app version + commit, latest version on GitHub, update status, visits today / 30 days / all time, unique visitors, distinct IPs, a 30-day sparkline, top countries and cities, recent visitors, server details (Node version, uptime, memory, store size), live sessions |
 | **Visits** | every page view: timestamp, **IP address**, **location** (city, region, country, ISP), device, browser, path, referrer; filters by day / country / free-text; CSV export; delete-all |
+| | each row also says **where its address came from** — the connection itself, a proxy header, or the visitor's browser — and what we saw first when those disagree |
 | **Updates** | current version, remote version + commit + message, install button, rollback list, live update log, and a description of what an update does |
 | **Credentials** | change username and/or password (current password required); signing out every session |
-| **Settings** | privacy mode (store hashed addresses instead of raw IPs), location lookups on/off, retention days, automatic update checks, automatic install, repository, branch, GitHub token |
+| **Settings** | privacy mode (store hashed addresses instead of raw IPs), location lookups on/off, who may speak for the visitor (proxy trust), the visitor address report on/off, retention days, automatic update checks, automatic install, repository, branch, GitHub token |
 | **Audit log** | every admin action, login attempt and update, with IP and time |
 
 The **version number is shown in three places**: the public app page footer, the admin panel
@@ -150,6 +152,43 @@ comes from a public IP service — `ipwho.is` over HTTPS, falling back to `ip-ap
 - **privacy mode** replaces the address with a salted SHA-256 hash of address + user agent. Unique
   and returning visitors are still counted; no address is stored.
 - **location lookups off** keeps every address on your own server, at the cost of the location column.
+
+#### The visitor's real address
+
+The address in the log should be the visitor's, and getting there means being honest about what a
+server can and cannot see. There are three cases, and the panel names which one a row is:
+
+1. **Behind a proxy you control** — nginx, Cloudflare, a load balancer, a container network. The
+   socket address is the proxy's, and the visitor's address is in a header
+   (`CF-Connecting-IP`, `X-Real-IP`, `X-Forwarded-For`, `Forwarded`, …). Anyone can forge those
+   headers, so they are only believed when the request came from something trusted. `trustProxy`
+   defaults to `auto`: headers are honoured when the connection came from loopback or a private
+   network — i.e. a proxy on this machine or the LAN — and ignored when a stranger connects
+   directly. Set it to `on` for a proxy that connects from elsewhere, or `off` to log raw sockets
+   only; the panel's Settings tab writes it to `/etc/meow-translator/config.json`.
+2. **Directly connected** — a plain port-80 server, no proxy. Then the socket address *is* the
+   visitor's, and it is logged as such.
+3. **Behind NAT, a router, or a container port-forward** — the only address the server ever sees is
+   a private one (`192.168.x.x`, `10.x.x.x`, a docker bridge address). No header can recover the
+   real address: the router rewrote it before the packet arrived. Asking a geolocation provider
+   about `192.168.1.5` would return that provider's guess about a network that is not on the
+   internet, which is worse than saying nothing — so **the location lookup is skipped** and the
+   visit is marked as private.
+
+   For that third case the browser is the only party that knows. When the address we see is private,
+   the page is served with a one-time `meow_visit` nonce (HttpOnly, `SameSite=Lax`, 15 minutes) and
+   the page's script asks a public service what address the world sees it from — `ipwho.is`,
+   `api.ipify.org`, `ifconfig.co` — then reports that address back to `/api/visit/ip`. The server
+   accepts it only for that nonce, only once, and only if it is a real routable public address
+   (private, loopback, link-local, multicast and documentation ranges are all refused). The row then
+   shows the reported address and its location, with what the server saw first kept beside it.
+
+   Two switches control this, both in Settings: **the report** (`reportVisitorIp`) and its endpoint
+   list (`publicIpEndpoints`, for an installation that would rather run its own lookup service). With
+   the report off — or in privacy mode, which turns it off — the page asks no third party at all.
+
+   The one cost is a request from the visitor's browser to whichever lookup service is first in the
+   list. Nothing else is sent with it, and the answer is only used to fill in the row.
 
 Raw IPs are personal data under the GDPR and similar regimes. If that matters to you, turn privacy
 mode on, set a retention window, and say so on the site.
@@ -274,10 +313,11 @@ Read the last line of a failed connection attempt this way:
 | symptom | cause and fix |
 |---|---|
 | recordings don't work, "microphone unavailable" | browsers need a secure context. Serve over HTTPS (`sudo meow-translator setup-https your.domain.com`) or use localhost. |
-| every visitor is logged as `127.0.0.1` | the app is behind a proxy but `trustProxy` is false. Set it in `/etc/meow-translator/config.json` (or let `setup-https` do it) and restart. |
+| every visitor is logged as `127.0.0.1` | the app is behind a proxy, but that proxy is not on this machine or the LAN, so `auto` will not believe its headers. Set `"trustProxy": true` in `/etc/meow-translator/config.json` (or in the Settings tab) and restart. |
+| addresses look like a router (`192.168.x.x`, `10.x.x.x`) | the server is behind NAT and cannot see the public address — the visitor's browser has to report it. Check that the Settings tab has the report on, and that the visitor's browser allows a request to the lookup service. |
 | can't reach it from another machine on the LAN | `sudo meow-translator net-check` — it checks the bind address, which program owns the port, whether the address is a LAN address at all (not a container bridge or a link-local one), and whether ufw allows the port, then prints the fix. |
 | changing the port to 80 leaves the service dead | the unit needs `CAP_NET_BIND_SERVICE` (above). `sudo meow-translator install-service` rewrites it from the deployed template. |
-| visitor addresses look forged | the app is exposed directly but `trustProxy` is true, so a client can send its own `X-Forwarded-For`. Set `"trustProxy": false` when nothing sits in front of the app. |
+| visitor addresses look forged | the app is exposed directly but `trustProxy` is `true`, so a client can send its own `X-Forwarded-For`. Use `"trustProxy": "auto"` (headers believed only from a local proxy) or `false` when nothing sits in front of the app. |
 | location column stays "looking up…" | outbound HTTPS is blocked, or lookups are off. Check with `sudo meow-translator geo-probe` and the Settings tab. |
 | update check fails with "VERSION not found" | the repository is not a valid update source yet — `VERSION` must exist at the root of the branch you follow. |
 | update check fails with "rate limit reached" | set a GitHub token in Settings (it also lets a private fork be used). |
@@ -373,8 +413,8 @@ node tools/verify-bundle.mjs    # the same, through the shipped single file: 18/
 ## Tests
 
 ```bash
-node tools/test-server.mjs                       # 83 checks: install, auth, visits, updates, rollback
-node tools/test-ui.mjs                           # 71 checks: the app's UI and the interface guidelines
+node tools/test-server.mjs                       # 126 checks: install, auth, visits, visitor addresses, updates, rollback
+node tools/test-ui.mjs                           # 92 checks: the app's UI, the interface guidelines, and the translate button
 node tools/test-installed.mjs http://127.0.0.1:8899   # verify a running installation over HTTP
 node tools/test-archive.mjs                      # 32 checks: the tar reader/writer the updater uses
 node tools/test-ownership.mjs                    # 36 checks: run as root, see Tests below
@@ -392,7 +432,12 @@ replaced by a script that always fails** — the exact way an update broke on a 
 update path that quietly reintroduced the dependency would fail the suite rather than the operator: one-time registration,
 CSRF and cross-origin refusals, visit logging with location, a real update *including the restart
 handshake*, a rollback, a deliberately broken download that must not touch the live tree, credential
-changes, login lockout, and privacy mode.
+changes, login lockout, and privacy mode. It also covers the visitor addresses: that a stranger's
+forwarding headers are ignored while a local proxy's are believed, that a private address is labelled
+as one and never geolocated, and that a browser report is accepted once, for the visit it belongs to,
+and only if it is a real public address. `test-ui.mjs` drives the translate button in a browser with
+**no Web Audio at all**, because a dead-looking button was once exactly that: an exception inside the
+click handler, which no screenshot would ever show.
 
 ## The interface
 
@@ -468,5 +513,8 @@ and the tuned weights must come from the same build, or the recogniser reads sta
 - One meow carries four bits. Top-1 on a single meow is ~92 % in good conditions, not 100 %.
 - The update system trusts this repository (TLS + pinned commit, no signature).
 - The visit log stores personal data unless privacy mode is on.
+- A server behind NAT cannot see the visitor's public address by itself; it depends on the visitor's
+  browser volunteering it, so a visitor with scripting or third-party requests blocked is logged as
+  the private address we can actually see.
 
 MIT licensed — see [LICENSE](LICENSE).

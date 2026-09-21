@@ -242,7 +242,7 @@ async function waitForHealth(timeoutMs) {
   /* the staged tree is the "already installed" release, so it says so */
   fs.writeFileSync(path.join(APP, 'VERSION'), BASE_VERSION + '\n');
   fs.writeFileSync(path.join(ETC, 'config.json'), JSON.stringify({
-    host: '127.0.0.1', port: PORT, appDir: APP, dataDir: DATA, restartMode: 'exec', trustProxy: false, sessionHours: 12,
+    host: '127.0.0.1', port: PORT, appDir: APP, dataDir: DATA, restartMode: 'exec', trustProxy: 'auto', sessionHours: 12,
   }, null, 2));
 
   /* ---- 0b. the shipped selftest must pass on a clean tree ----------------- */
@@ -567,7 +567,229 @@ async function waitForHealth(timeoutMs) {
   const backOn = await get('/api/admin/overview', { headers: { cookie: cookies } });
   check('privacy mode can be turned back off', backOn.body.settings.storeRawIp === true);
 
-  /* ---- 15. restart from the panel --------------------------------------- */
+
+  /* ---- 15. the visitor's real (WAN) address ----------------------------- */
+  /* Two failure modes are worth guarding here. Believing the forwarding
+     headers from anyone turns the visit log into a visitor-written field; and
+     showing a router's or container's address as if it were the visitor's is
+     the complaint that started this. Both are decided in server/lib/clientip.js,
+     so most of it is testable without a socket. */
+  const clientip = await import(path.join(APP, 'server', 'lib', 'clientip.js'));
+  const reqFrom = (peer, headers) => ({ socket: { remoteAddress: peer }, headers: headers || {} });
+  const AUTO = { trustProxy: 'auto', trustedProxies: [] };
+
+  const stranger = clientip.resolve(reqFrom('203.0.113.7', {
+    'x-forwarded-for': '1.2.3.4', 'cf-connecting-ip': '5.6.7.8', 'x-real-ip': '9.9.9.9',
+  }), AUTO);
+  check('a stranger cannot write their own address into the log',
+    stranger.ip === '203.0.113.7' && stranger.source === 'socket', JSON.stringify(stranger));
+
+  const viaNginx = clientip.resolve(reqFrom('127.0.0.1', { 'x-forwarded-for': '10.0.0.4, 8.8.4.4' }), AUTO);
+  check('a proxy on this machine is believed, and the right address is taken',
+    viaNginx.ip === '8.8.4.4' && viaNginx.source === 'x-forwarded-for' && viaNginx.private === false,
+    JSON.stringify(viaNginx));
+  check('the whole hop chain is kept for the panel to show',
+    JSON.stringify(viaNginx.chain) === JSON.stringify(['127.0.0.1', '10.0.0.4', '8.8.4.4']),
+    JSON.stringify(viaNginx.chain));
+
+  const named = clientip.resolve(reqFrom('127.0.0.1', {
+    'cf-connecting-ip': '8.8.8.8', 'x-forwarded-for': '1.2.3.4',
+  }), AUTO);
+  check('a CDN header that names the client outright wins', named.ip === '8.8.8.8' && named.source === 'cloudflare',
+    JSON.stringify(named));
+
+  const forwarded = clientip.resolve(reqFrom('127.0.0.1', { forwarded: 'for="9.9.9.9";proto=https' }), AUTO);
+  check('the RFC 7239 Forwarded header is understood', forwarded.ip === '9.9.9.9' && forwarded.source === 'forwarded',
+    JSON.stringify(forwarded));
+
+  const forced = clientip.resolve(reqFrom('127.0.0.1', { 'x-forwarded-for': '8.8.4.4' }), { trustProxy: false });
+  check('turning proxy trust off falls back to the connecting address',
+    forced.ip === '127.0.0.1' && forced.source === 'socket', JSON.stringify(forced));
+
+  const trusted = clientip.resolve(reqFrom('203.0.113.7', { 'x-forwarded-for': '8.8.4.4' }), { trustProxy: true });
+  check('a proxy somewhere else can be trusted explicitly',
+    trusted.ip === '8.8.4.4' && trusted.source === 'x-forwarded-for', JSON.stringify(trusted));
+
+  const cidr = clientip.resolve(reqFrom('198.51.100.9', { 'x-real-ip': '8.8.4.4' }),
+    { trustProxy: 'auto', trustedProxies: ['198.51.100.0/24'] });
+  check('a proxy named by address range is believed',
+    cidr.ip === '8.8.4.4' && cidr.source === 'x-real-ip', JSON.stringify(cidr));
+  check('CIDR matching is not a prefix match',
+    clientip.inCidr('198.51.100.9', '198.51.100.0/24') === true &&
+    clientip.inCidr('198.51.101.9', '198.51.100.0/24') === false &&
+    clientip.inCidr('10.4.3.2', '10.0.0.0/8') === true);
+
+  const lan = clientip.resolve(reqFrom('192.168.1.50'), AUTO);
+  check('an address out of the router is flagged as private, not shown as a visitor',
+    lan.private === true && lan.source === 'socket', JSON.stringify(lan));
+
+  const dockerish = clientip.resolve(reqFrom('172.17.0.1', { 'x-forwarded-for': '8.8.4.4' }), AUTO);
+  check('a container network counts as a local proxy',
+    dockerish.ip === '8.8.4.4' && dockerish.private === false, JSON.stringify(dockerish));
+
+  check('a private address is what asks the browser for the real one',
+    clientip.wantsReport(lan, { reportVisitorIp: true, storeRawIp: true }) === true &&
+    clientip.wantsReport({ private: false }, { reportVisitorIp: true, storeRawIp: true }) === false,
+    'a public address needs no report');
+  check('the report can be switched off, and privacy mode switches it off too',
+    clientip.wantsReport(lan, { reportVisitorIp: false, storeRawIp: true }) === false &&
+    clientip.wantsReport(lan, { reportVisitorIp: true, storeRawIp: false }) === false);
+
+  const rejected = [
+    ['', 'empty'], ['not-an-address', 'nonsense'], ['10.0.0.5', 'private'],
+    ['127.0.0.1', 'loopback'], ['169.254.1.1', 'link-local'], ['192.0.2.5', 'documentation'],
+    ['203.0.113.5', 'test range'], ['198.51.100.7', 'test range'], ['224.0.0.1', 'multicast'],
+    ['300.1.1.1', 'out of range octet'], ['1.2.3', 'incomplete'],
+  ];
+  const wronglyAccepted = rejected.filter(([ip]) => clientip.validateReported(ip).ok).map(([ip]) => ip);
+  check('an unusable address is refused as a report', wronglyAccepted.length === 0, wronglyAccepted.join(', '));
+  const accepted = clientip.validateReported(' 8.8.4.4 ');
+  check('a real public address is accepted, and normalised',
+    accepted.ok === true && accepted.ip === '8.8.4.4' && accepted.family === 4, JSON.stringify(accepted));
+  const v6 = clientip.validateReported('2606:4700:4700::1111');
+  check('a public IPv6 address is accepted too', v6.ok === true && v6.family === 6, JSON.stringify(v6));
+
+  /* A report re-keys the day's unique count: the visitor is one person whether
+     they arrived through the router's address or their own. */
+  const stats = await import(path.join(APP, 'server', 'lib', 'stats.js'));
+  const fakeStore = { data: { settings: { storeRawIp: true }, dayStats: {}, visits: [] }, dirty() {}, save() {}, audit() {} };
+  const ua = 'Mozilla/5.0 (iPhone) test';
+  const a = stats.record(fakeStore, { ip: '192.168.1.50', path: '/', ua, ref: '', source: 'socket', chain: [] });
+  const b = stats.record(fakeStore, { ip: '10.0.0.9', path: '/', ua, ref: '', source: 'socket', chain: [] });
+  const dayOf = () => fakeStore.data.dayStats[stats.dayKey(Date.now())];
+  check('two private visitors count as two uniques while they are unknown', dayOf().uniques === 2, String(dayOf().uniques));
+  stats.rehash(fakeStore, a, '8.8.4.4');
+  stats.rehash(fakeStore, b, '8.8.4.4');
+  check('once both report the same public address they count as one person',
+    dayOf().uniques === 1, String(dayOf().uniques));
+  check('the day keeps the address it now knows them by',
+    !!dayOf().seen[stats.visitorHash('8.8.4.4', ua)] && !dayOf().seen[stats.visitorHash('192.168.1.50', ua)],
+    JSON.stringify(Object.keys(dayOf().seen)));
+
+  /* The nonce ties one report to one visit, and dies with it. */
+  const nonceStore = { data: { settings: { storeRawIp: true }, dayStats: {}, visits: [] }, dirty() {}, audit() {} };
+  const visit = stats.record(nonceStore, { ip: '192.168.1.9', path: '/', ua, ref: '', source: 'socket', chain: [] });
+  visit.reportNonce = 'a-nonce-for-one-visit';
+  check('a fresh nonce is honoured', stats.byReportNonce(nonceStore, 'a-nonce-for-one-visit') === visit);
+  check('an unknown nonce counts for nothing', stats.byReportNonce(nonceStore, 'made-up') === null);
+  visit.t = Date.now() - 16 * 60 * 1000;
+  check('an old nonce stops working', stats.byReportNonce(nonceStore, 'a-nonce-for-one-visit') === null);
+
+  /* ...and the same thing over HTTP, which is how a visitor arrives. */
+  const visitorRes = await fetch(BASE() + '/', { redirect: 'manual' });
+  const visitorPage = await visitorRes.text();
+  const nonceCookie = /meow_visit=([^;]+)/.exec(visitorRes.headers.get('set-cookie') || '');
+  check('a visitor we cannot see is handed a one-time nonce', !!nonceCookie,
+    `set-cookie: ${visitorRes.headers.get('set-cookie')}`);
+  const runtime = /<script id="meow-runtime"[^>]*>([\s\S]*?)<\/script>/.exec(visitorPage);
+  let runtimeCfg = null;
+  try { runtimeCfg = runtime && JSON.parse(runtime[1]); } catch (e) { runtimeCfg = null; }
+  check('the page is told where to report from, and where to send it',
+    !!runtimeCfg && runtimeCfg.report === true && runtimeCfg.post === '/api/visit/ip' &&
+    Array.isArray(runtimeCfg.endpoints) && runtimeCfg.endpoints.length > 0,
+    JSON.stringify(runtimeCfg));
+  check('the services the page may call are allowed by the page\'s own policy',
+    runtimeCfg && runtimeCfg.endpoints.every(u => /^https?:\/\//.test(u)),
+    JSON.stringify(runtimeCfg && runtimeCfg.endpoints));
+
+  /* store.json is written on a short timer, so a check has to wait for the row
+     rather than read the file the instant the response arrives */
+  const findVisit = async (predicate, tries = 30) => {
+    for (let i = 0; i < tries; i++) {
+      const rows = JSON.parse(fs.readFileSync(storePath, 'utf8')).visits;
+      const hit = rows.slice(-8).find(predicate);
+      if (hit) return hit;
+      await sleep(100);
+    }
+    return null;
+  };
+
+  const cookieHeader = nonceCookie ? { cookie: `meow_visit=${nonceCookie[1]}` } : {};
+  const report = async (ip, extraHeaders) => {
+    const res = await fetch(BASE() + '/api/visit/ip', {
+      method: 'POST',
+      headers: Object.assign({ 'content-type': 'application/json' }, cookieHeader, extraHeaders || {}),
+      body: JSON.stringify({ ip, source: 'browser' }),
+    });
+    let body = null;
+    try { body = await res.json(); } catch (e) { body = null; }
+    return { status: res.status, body };
+  };
+
+  const bad = await report('10.0.0.7');
+  check('a report of another private address is refused', bad.status === 400, JSON.stringify(bad));
+  const junk = await report('someone-elses-address');
+  check('a report of nonsense is refused', junk.status === 400, JSON.stringify(junk));
+
+  const good = await report('8.8.4.4');
+  check('the visitor’s own public address is accepted', good.status === 200 && good.body.ok === true, JSON.stringify(good));
+
+  const reported = await findVisit(v => v.source === 'reported');
+  check('the visit now shows the address the visitor reported',
+    !!reported && reported.ip === '8.8.4.4' && reported.private === false && reported.reportState === 'accepted',
+    JSON.stringify(reported));
+  check('what we actually saw is kept beside it, not thrown away',
+    !!reported && reported.socketIp === '127.0.0.1', JSON.stringify(reported && reported.socketIp));
+  check('the row says where the address came from', !!reported && !!clientip.SOURCE_LABEL[reported.source],
+    JSON.stringify(reported && reported.source));
+
+  const secondReport = await report('9.9.9.9');
+  check('the same nonce cannot report twice',
+    secondReport.status === 404 && /expired/.test(String(secondReport.body.error)), JSON.stringify(secondReport));
+
+  const strangerRes = await fetch(BASE() + '/api/visit/ip', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ ip: '8.8.4.4' }),
+  });
+  check('a report from nobody is refused', strangerRes.status === 400, String(strangerRes.status));
+
+  /* With the switch off, the page is not told to ask and the endpoint refuses. */
+  await post('/api/admin/settings', { reportVisitorIp: false });
+  const offPage = await fetch(BASE() + '/', { redirect: 'manual' });
+  const offHtml = await offPage.text();
+  const offCfg = JSON.parse(/<script id="meow-runtime"[^>]*>([\s\S]*?)<\/script>/.exec(offHtml)[1]);
+  check('with the switch off the page never asks a third party',
+    offCfg.report === false && offCfg.endpoints.length === 0, JSON.stringify(offCfg));
+  check('and no nonce is handed out', !/meow_visit=/.test(offPage.headers.get('set-cookie') || ''),
+    String(offPage.headers.get('set-cookie')));
+  const offReport = await report('8.8.4.4');
+  check('and the endpoint refuses a late report', offReport.status === 400 || offReport.status === 403 || offReport.status === 404,
+    JSON.stringify(offReport));
+  await post('/api/admin/settings', { reportVisitorIp: true });
+
+  /* Who may speak for the visitor is a setting the operator owns. */
+  const autoOverview = await get('/api/admin/overview', { headers: { cookie: cookies } });
+  check('the panel can see who is allowed to speak for the visitor',
+    autoOverview.body.settings.trustProxy === 'auto' && autoOverview.body.settings.reportVisitorIp === true &&
+    autoOverview.body.server.trustProxy === 'auto',
+    JSON.stringify({ settings: autoOverview.body.settings.trustProxy, server: autoOverview.body.server.trustProxy }));
+  const forwardedRow = await fetch(BASE() + '/', { headers: { 'x-forwarded-for': '1.1.1.1' }, redirect: 'manual' });
+  check('a proxy in front of the app gets the visitor logged correctly',
+    forwardedRow.status === 200);
+  const loggedProxy = await findVisit(v => v.ip === '1.1.1.1');
+  check('the visitor behind the proxy is logged by their own address',
+    !!loggedProxy && loggedProxy.source === 'x-forwarded-for' && loggedProxy.private === false,
+    JSON.stringify(loggedProxy));
+
+  await post('/api/admin/settings', { trustProxy: '0' });
+  const offOverview = await get('/api/admin/overview', { headers: { cookie: cookies } });
+  check('the operator can switch proxy trust off',
+    offOverview.body.settings.trustProxy === false && offOverview.body.server.trustProxy === false,
+    JSON.stringify(offOverview.body.settings.trustProxy));
+  check('and the choice is written where a restart will find it',
+    JSON.parse(fs.readFileSync(path.join(ETC, 'config.json'), 'utf8')).trustProxy === false,
+    fs.readFileSync(path.join(ETC, 'config.json'), 'utf8').slice(0, 200));
+  const ignoredAt = Date.now();
+  await fetch(BASE() + '/', { headers: { 'x-forwarded-for': '1.1.1.1' }, redirect: 'manual' });
+  const ignored = await findVisit(v => v.t >= ignoredAt);
+  check('with proxy trust off a forged header is ignored again',
+    ignored.ip === '127.0.0.1' && ignored.source === 'socket', JSON.stringify(ignored));
+  await post('/api/admin/settings', { trustProxy: 'auto' });
+  check('proxy trust can be put back to automatic',
+    (await get('/api/admin/overview', { headers: { cookie: cookies } })).body.settings.trustProxy === 'auto');
+
+  /* ---- 16. restart from the panel --------------------------------------- */
   const beforeRestart = await waitForHealth(5000);
   const rres = await post('/api/admin/restart', {});
   check('restart is accepted from the panel', rres.status === 200 && rres.body.ok === true, JSON.stringify(rres.body));
@@ -577,13 +799,13 @@ async function waitForHealth(timeoutMs) {
   check('the store survived the restart (admin still registered)',
     JSON.parse(fs.readFileSync(storePath, 'utf8')).admin.username === 'michael');
 
-  /* ---- 16. everything is still there after all of that ------------------ */
+  /* ---- 17. everything is still there after all of that ------------------ */
   const finalStore = JSON.parse(fs.readFileSync(storePath, 'utf8'));
   check('visit history survived updates and restarts', finalStore.visits.length >= 4, String(finalStore.visits.length));
   check('credentials survived every restart', !!finalStore.admin && finalStore.admin.hash && finalStore.admin.username === 'michael');
   check('version history survived every restart', finalStore.versions.length >= 3, String(finalStore.versions.length));
 
-  /* ---- 17. rate limiting (last: it deliberately fills this IP's bucket) -- */
+  /* ---- 18. rate limiting (last: it deliberately fills this IP's bucket) -- */
   let limited = false;
   for (let i = 0; i < 300 && !limited; i++) {
     const r = await fetch(BASE() + '/api/admin/overview', { headers: { cookie: cookies } });
