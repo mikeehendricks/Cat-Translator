@@ -131,7 +131,14 @@ const commands = {
       if (r.error) { console.error(`  ${C.err}${r.error}${C.off}`); process.exitCode = 1; return; }
       console.log(`\n  installed  v${r.installed.version}${r.installed.sha ? ` (${r.installed.shortSha})` : ''}`);
       console.log(`  remote     v${r.remote.version} (${r.remote.shortSha})  ${r.remote.message || ''}`);
-      console.log(`  status     ${r.sameSha ? 'identical commit' : r.newer ? 'a newer version is available' : 'the remote is older or equal'}\n`);
+      const status = r.sameSha
+        ? 'identical commit — nothing to install'
+        : r.newer
+          ? `a newer version is available — "meow-translator update" installs it`
+          : r.publish
+            ? 'same version number, different commit — "meow-translator update" redeploys it'
+            : 'the remote is older than what is installed';
+      console.log(`  status     ${status}\n`);
       return;
     }
     const sha = opt('--sha', null);
