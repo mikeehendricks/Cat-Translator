@@ -777,9 +777,12 @@ async function waitForHealth(timeoutMs) {
   check('the operator can switch proxy trust off',
     offOverview.body.settings.trustProxy === false && offOverview.body.server.trustProxy === false,
     JSON.stringify(offOverview.body.settings.trustProxy));
-  check('and the choice is written where a restart will find it',
-    JSON.parse(fs.readFileSync(path.join(ETC, 'config.json'), 'utf8')).trustProxy === false,
-    fs.readFileSync(path.join(ETC, 'config.json'), 'utf8').slice(0, 200));
+  /* the service cannot write /etc (the shipped unit leaves it read-only), so the
+     choice is kept with the other settings, in the data directory */
+  check('and the choice is stored where the service can write, not in /etc',
+    JSON.parse(fs.readFileSync(storePath, 'utf8')).settings.trustProxy === false &&
+    JSON.parse(fs.readFileSync(path.join(ETC, 'config.json'), 'utf8')).trustProxy === 'auto',
+    `store ${JSON.parse(fs.readFileSync(storePath, 'utf8')).settings.trustProxy}, config ${JSON.parse(fs.readFileSync(path.join(ETC, 'config.json'), 'utf8')).trustProxy}`);
   const ignoredAt = Date.now();
   await fetch(BASE() + '/', { headers: { 'x-forwarded-for': '1.1.1.1' }, redirect: 'manual' });
   const ignored = await findVisit(v => v.t >= ignoredAt);
@@ -788,6 +791,8 @@ async function waitForHealth(timeoutMs) {
   await post('/api/admin/settings', { trustProxy: 'auto' });
   check('proxy trust can be put back to automatic',
     (await get('/api/admin/overview', { headers: { cookie: cookies } })).body.settings.trustProxy === 'auto');
+  /* left set to "on" on purpose: section 16 restarts the service and looks again */
+  await post('/api/admin/settings', { trustProxy: '1' });
 
   /* ---- 16. restart from the panel --------------------------------------- */
   const beforeRestart = await waitForHealth(5000);
@@ -798,6 +803,10 @@ async function waitForHealth(timeoutMs) {
     `instance before ${beforeRestart && beforeRestart.instanceId}, after ${afterRestart && afterRestart.instanceId}`);
   check('the store survived the restart (admin still registered)',
     JSON.parse(fs.readFileSync(storePath, 'utf8')).admin.username === 'michael');
+  const afterRestartOverview = await get('/api/admin/overview', { headers: { cookie: cookies } });
+  check('a proxy-trust choice made in the panel survives a restart',
+    afterRestartOverview.body.settings.trustProxy === true, JSON.stringify(afterRestartOverview.body.settings.trustProxy));
+  await post('/api/admin/settings', { trustProxy: 'auto' });
 
   /* ---- 17. everything is still there after all of that ------------------ */
   const finalStore = JSON.parse(fs.readFileSync(storePath, 'utf8'));

@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.14
+
+- **A proxy-trust choice made in the panel is now actually kept.** 1.0.13 wrote it to
+  `/etc/meow-translator/config.json`, which looks right and is not: the shipped systemd unit runs the
+  service with `ProtectSystem=strict` and that file is deliberately root-owned, so the write failed
+  (silently, as a warning) and the choice reverted on the next restart — while the panel went on
+  showing the chosen value until then. It is now stored with the other settings in the data
+  directory, which is the part of an installation the service owns, and applied at start-up over
+  whatever the config file says. The config remains the installer's default; the Settings tab says
+  which file that is and where the choice is kept.
+
 ## 1.0.13
 
 - **The visit log now shows the visitor's own address, and says how it knows.** A server can see the

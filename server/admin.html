@@ -953,6 +953,11 @@ async function loadSettings() {
             <option value="1"${s.trustProxy === true ? ' selected' : ''}>on — believe them from anywhere (nginx/Cloudflare you control)</option>
             <option value="0"${s.trustProxy === false ? ' selected' : ''}>off — ignore them, log the address that connects</option>
           </select>
+          <p class="tinies" style="margin:6px 0 0">
+            The config file (<span class="mono">${esc(sv.configPath || '/etc/meow-translator/config.json')}</span>) sets the
+            installed default; a choice made here is kept with the rest of the settings in the data directory, which is
+            the part of the installation this service can write to. It takes effect immediately and survives a restart.
+          </p>
           <label>Visitor&rsquo;s own (WAN) address</label>
           <select id="sReportIp">
             <option value="1"${s.reportVisitorIp !== false ? ' selected' : ''}>on — ask the visitor&rsquo;s browser, when this server cannot see a public address</option>

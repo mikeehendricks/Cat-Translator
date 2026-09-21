@@ -37,6 +37,7 @@ const { Updater, sha8, dirSize } = require('./lib/updater');
 
 const cfg = config.load();
 const store = new Store(cfg.storePath);
+applyStoredTrustProxy();
 const updater = new Updater(cfg, store);
 const geo = new Geo(store, cfg, (level, msg) => { log(level, msg); });
 
@@ -619,6 +620,7 @@ async function adminApi(req, res, route, ipInfo) {
         port: cfg.port,
         trustProxy: cfg.trustProxy,
         trustedProxies: cfg.trustedProxies || [],
+        configPath: cfg.configPath,
         reportVisitorIp: store.data.settings.reportVisitorIp !== false,
         versionsDirBytes: (() => { try { return dirSize(cfg.versionsDir); } catch (e) { return 0; } })(),
       },
@@ -779,11 +781,10 @@ async function adminApi(req, res, route, ipInfo) {
     if (body.geoLookup !== undefined) s.geoLookup = !!body.geoLookup;
     if (body.reportVisitorIp !== undefined) s.reportVisitorIp = !!body.reportVisitorIp;
     if (body.trustProxy !== undefined) {
-      const raw = String(body.trustProxy).toLowerCase();
-      if (raw === 'auto') cfg.trustProxy = 'auto';
-      else if (raw === '1' || raw === 'true') cfg.trustProxy = true;
-      else cfg.trustProxy = false;
-      persistTrustProxy(cfg.trustProxy);
+      const chosen = normaliseTrustProxy(body.trustProxy);
+      store.data.settings.trustProxy = chosen;
+      cfg.trustProxy = chosen;
+      log('info', `trustProxy set to ${JSON.stringify(chosen)} from the admin panel`);
     }
     appPageCache = null;              // the page carries this configuration
     if (body.publicIpEndpoints !== undefined) {
@@ -848,18 +849,24 @@ function publicSettings() {
 }
 
 /**
- * Remember a trustProxy change in the config file, so it survives a restart —
- * the setting lives in the config, not the store, because it is about the
- * network the process is listening on.
+ * Proxy trust is the one setting that also lives in the config file, because it
+ * describes the network the process is listening on. The config gives the
+ * installed default; a choice made in the panel is kept with the other settings
+ * in the data directory, where the service can actually write — /etc is
+ * deliberately root-owned and read-only for the service under the shipped unit.
  */
-function persistTrustProxy(value) {
-  try {
-    const raw = JSON.parse(fs.readFileSync(cfg.configPath, 'utf8'));
-    raw.trustProxy = value;
-    fs.writeFileSync(cfg.configPath, JSON.stringify(raw, null, 2) + '\n', { mode: 0o640 });
-    log('info', `trustProxy set to ${JSON.stringify(value)} in ${cfg.configPath}`);
-  } catch (err) {
-    log('warn', `could not write trustProxy to ${cfg.configPath}: ${err.message}`);
+function normaliseTrustProxy(raw) {
+  const v = String(raw).toLowerCase();
+  if (v === 'auto') return 'auto';
+  if (v === '1' || v === 'true' || v === 'on') return true;
+  return false;
+}
+
+function applyStoredTrustProxy() {
+  const stored = store.data.settings.trustProxy;
+  if (stored === 'auto' || stored === true || stored === false) {
+    if (stored !== cfg.trustProxy) log('info', `trustProxy from the panel: ${JSON.stringify(stored)} (config says ${JSON.stringify(cfg.trustProxy)})`);
+    cfg.trustProxy = stored;
   }
 }
 

@@ -35,6 +35,9 @@ function freshStore() {
          container network, a rewriting proxy), the visitor's browser is asked
          for the address the world sees it from. See lib/clientip.js. */
       reportVisitorIp: true,
+      /* Who may speak for the visitor. null = whatever the config file says
+         (the installer writes "auto" or "on"); a panel choice is kept here. */
+      trustProxy: null,
       publicIpEndpoints: [],     // empty -> the built-in list; edit in the panel
       autoCheckUpdates: true,
       autoInstallUpdates: false,
