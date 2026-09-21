@@ -41,8 +41,34 @@ create your account. That is the only time registration is open.
 ```bash
 sudo ./install.sh --domain cat.example.com --email you@example.com   # with TLS
 sudo ./install.sh --port 9000 --host 0.0.0.0                         # exposed directly
+sudo ./install.sh --port 80 --host 0.0.0.0                           # the bare port 80
 sudo ./install.sh --help                                            # all options
 ```
+
+### Running on port 80 (or 443, or any port below 1024)
+
+```bash
+sudo ./install.sh --port 80 --host 0.0.0.0
+```
+
+The service does **not** run as root, so it cannot bind a privileged port on its own. The unit
+therefore grants exactly one capability:
+
+```ini
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+```
+
+That permission allows binding ports below 1024 and nothing else — no files, no other capabilities —
+and it holds even with `NoNewPrivileges=true`, because systemd applies the ambient set before exec.
+To change the port on an existing install, re-run the installer with the new value (it rewrites
+`config.json` and the unit and restarts), or edit `/etc/meow-translator/config.json` and run
+`sudo meow-translator install-service`. `sudo meow-translator doctor` checks that the unit grants
+the capability whenever the configured port is below 1024.
+
+Remember to open the port in your firewall (`sudo ufw allow 80/tcp`), and note that on plain HTTP
+your admin password crosses the network in the clear — see *HTTPS* below. Both things are only
+about exposure; the app itself is identical.
 
 > **Microphone note:** browsers only allow audio capture in a secure context. Over plain HTTP the
 > app still synthesises and plays meows, and the "read back the last meow" self-test still works —
@@ -204,6 +230,8 @@ Rebuild `cat-translator.html` (`node tools/build-app.mjs`) before bumping if you
 |---|---|
 | recordings don't work, "microphone unavailable" | browsers need a secure context. Serve over HTTPS (`sudo meow-translator setup-https your.domain.com`) or use localhost. |
 | every visitor is logged as `127.0.0.1` | the app is behind a proxy but `trustProxy` is false. Set it in `/etc/meow-translator/config.json` (or let `setup-https` do it) and restart. |
+| changing the port to 80 leaves the service dead | the unit needs `CAP_NET_BIND_SERVICE` (above). `sudo meow-translator install-service` rewrites it from the deployed template. |
+| visitor addresses look forged | the app is exposed directly but `trustProxy` is true, so a client can send its own `X-Forwarded-For`. Set `"trustProxy": false` when nothing sits in front of the app. |
 | location column stays "looking up…" | outbound HTTPS is blocked, or lookups are off. Check with `sudo meow-translator geo-probe` and the Settings tab. |
 | update check fails with "VERSION not found" | the repository is not a valid update source yet — `VERSION` must exist at the root of the branch you follow. |
 | update check fails with "rate limit reached" | set a GitHub token in Settings (it also lets a private fork be used). |

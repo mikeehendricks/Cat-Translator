@@ -394,6 +394,25 @@ const commands = {
       else {
         const unit = fs.readFileSync(unitPath, 'utf8');
         if (!/Restart=always/.test(unit)) problems.push('the unit does not say Restart=always, so the updater cannot restart the service by exiting');
+        /* a port below 1024 needs the capability: without it the service cannot
+           bind, which looks like "the app is down" right after changing the port */
+        if (Number(cfg.port) < 1024 && !/^AmbientCapabilities=.*CAP_NET_BIND_SERVICE/m.test(unit)) {
+          problems.push(`the port is ${cfg.port}, which needs CAP_NET_BIND_SERVICE, but the unit does not grant it — run: meow-translator install-service`);
+          if (fix && isRoot()) {
+            const template = path.join(cfg.appDir, 'deploy', 'meow-translator.service');
+            if (fs.existsSync(template)) {
+              const text = fs.readFileSync(template, 'utf8')
+                .replace(/^User=.*$/m, `User=${serviceUser}`)
+                .replace(/^Group=.*$/m, `Group=${serviceUser}`)
+                .replace(/^WorkingDirectory=.*$/m, `WorkingDirectory=${cfg.appDir}`)
+                .replace(/^ExecStart=.*$/m, `ExecStart=${process.execPath} ${cfg.appDir}/server/server.js`)
+                .replace(/^ReadWritePaths=.*$/m, `ReadWritePaths=${cfg.appDir} ${cfg.dataDir}`);
+              fs.writeFileSync(unitPath, text);
+              sh('systemctl daemon-reload');
+              fixed.push('service unit (capability for the privileged port)');
+            }
+          }
+        }
         if (!new RegExp(`User=${serviceUser}`).test(unit)) notes.push(`the unit does not run as ${serviceUser}`);
         const template = path.join(APP_DIR, 'deploy', 'meow-translator.service');
         if (fs.existsSync(template) && !/Restart=always/.test(fs.readFileSync(template, 'utf8'))) notes.push('the shipped unit template lost Restart=always');

@@ -24,6 +24,13 @@ StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=meow-translator
 
+# Binding a port below 1024 (e.g. --port 80) is a privileged operation, and the
+# service deliberately does not run as root. CAP_NET_BIND_SERVICE is the whole
+# permission needed, and it grants nothing else — no files, no other caps. With
+# NoNewPrivileges below, systemd applies the ambient capability before exec.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
 # Modest hardening. Deliberately no MemoryDenyWriteExecute: V8's JIT needs it.
 NoNewPrivileges=true
 PrivateTmp=true

@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.6
+
+- **The service can run on a privileged port.** `sudo ./install.sh --port 80 --host 0.0.0.0` now
+  works: the systemd unit grants `CAP_NET_BIND_SERVICE` (and its bounding set) so the unprivileged
+  service can bind ports below 1024, without running as root and without weakening
+  `NoNewPrivileges`.
+- `doctor` checks that the unit grants that capability whenever the configured port is below 1024,
+  and `--fix` rewrites the unit from the deployed template.
+- Documented: changing the port on an existing install, the firewall, and why `trustProxy` should be
+  false when nothing sits in front of the app.
+
 ## 1.0.5
 
 - **The updates list marks the right row as running.** It used to mark the newest snapshot, which is
