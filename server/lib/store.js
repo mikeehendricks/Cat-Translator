@@ -80,6 +80,16 @@ class Store {
       this.data.schema = SCHEMA;
       this.dirty();
     } catch (e) {
+      /* A permission problem is an operator error with a one-line fix, and it
+         must not be mistaken for a corrupt file — starting fresh here would look
+         like the credentials and visit log had vanished. Say what to do instead. */
+      if (e.code === 'EACCES' || e.code === 'EPERM') {
+        throw new Error(
+          `cannot read ${this.file}: ${e.message}\n` +
+          `        the service must own its data directory. Fix it with:\n` +
+          `          sudo chown -R meow:meow ${path.dirname(this.file)} && sudo systemctl restart meow-translator`,
+        );
+      }
       if (e.code !== 'ENOENT') {
         const broken = `${this.file}.broken-${Date.now()}`;
         try { fs.renameSync(this.file, broken); } catch (_) {}
@@ -107,10 +117,17 @@ class Store {
 
   save() {
     if (this._timer) { clearTimeout(this._timer); this._timer = null; }
-    fs.mkdirSync(path.dirname(this.file), { recursive: true, mode: 0o750 });
-    const tmp = `${this.file}.tmp-${process.pid}`;
-    fs.writeFileSync(tmp, JSON.stringify(this.data), { mode: 0o600 });
-    fs.renameSync(tmp, this.file);
+    try {
+      fs.mkdirSync(path.dirname(this.file), { recursive: true, mode: 0o750 });
+      const tmp = `${this.file}.tmp-${process.pid}`;
+      fs.writeFileSync(tmp, JSON.stringify(this.data), { mode: 0o600 });
+      fs.renameSync(tmp, this.file);
+    } catch (e) {
+      const hint = (e.code === 'EACCES' || e.code === 'EPERM')
+        ? `\n        the service user must be able to write ${path.dirname(this.file)} (sudo chown -R meow:meow ${path.dirname(this.file)})`
+        : '';
+      throw new Error(`cannot write ${this.file}: ${e.message}${hint}`);
+    }
     this._dirty = false;
   }
 
