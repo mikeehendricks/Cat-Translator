@@ -199,11 +199,33 @@ ARCHIVE_JS=""
 if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/server/lib/archive.js" ]; then
   ARCHIVE_JS="$SCRIPT_DIR/server/lib/archive.js"
 elif command -v node >/dev/null 2>&1; then
+  # Two independent sources, because the first one is a CDN and a cached miss
+  # would send this install back to the tar that may be the reason we are here:
+  # raw.githubusercontent, then the API (which also works for a private fork
+  # when a token was supplied, and caches separately).
   RAW_BASE="${GITHUB_RAW:-https://raw.githubusercontent.com}"
-  if curl -fsSL --retry 2 --max-time 60 \
-       "$RAW_BASE/$REPO_DEFAULT/$BRANCH_DEFAULT/server/lib/archive.js" \
-       -o "$STAGE/archive.js" 2>/dev/null; then
+  fetch_reader() {
+    curl -fsSL --retry 2 --max-time 60 "$1" -o "$STAGE/archive.js" 2>/dev/null
+  }
+  if fetch_reader "$RAW_BASE/$REPO_DEFAULT/$BRANCH_DEFAULT/server/lib/archive.js?cb=install-$$-$RANDOM"; then
     ARCHIVE_JS="$STAGE/archive.js"
+  elif command -v curl >/dev/null 2>&1; then
+    API_BASE="${GITHUB_API:-https://api.github.com}"
+    if [ -n "$GITHUB_TOKEN" ]; then
+      curl -fsSL --retry 2 --max-time 60 -H "authorization: Bearer $GITHUB_TOKEN" \
+        -H 'accept: application/vnd.github.raw' \
+        "$API_BASE/repos/$REPO_DEFAULT/contents/server/lib/archive.js?ref=$BRANCH_DEFAULT" \
+        -o "$STAGE/archive.js" 2>/dev/null && ARCHIVE_JS="$STAGE/archive.js"
+    else
+      curl -fsSL --retry 2 --max-time 60 -H 'accept: application/vnd.github.raw' \
+        "$API_BASE/repos/$REPO_DEFAULT/contents/server/lib/archive.js?ref=$BRANCH_DEFAULT" \
+        -o "$STAGE/archive.js" 2>/dev/null && ARCHIVE_JS="$STAGE/archive.js"
+    fi
+    # a JSON error page saved as a file is worse than no file at all
+    if [ -n "$ARCHIVE_JS" ] && ! head -c 200 "$STAGE/archive.js" | grep -q "use strict"; then
+      ARCHIVE_JS=""
+      rm -f "$STAGE/archive.js"
+    fi
   fi
 fi
 

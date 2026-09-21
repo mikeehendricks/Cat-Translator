@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.12
+
+- **The installer fetches its unpacking reader from two independent sources.** It takes
+  `server/lib/archive.js` from `raw.githubusercontent.com` (a CDN, which once served a cached miss for
+  a file that had just been added — and a cached miss would send the install straight back to the tar
+  that may be the reason for installing) and, if that fails, from the GitHub API, which caches
+  separately and works for a private fork when a token was supplied. A response that is not the file
+  (a JSON error page saved as `archive.js`) is discarded rather than run.
+
 ## 1.0.11
 
 - **A root command that has to create the data directory now gives it to the service account.**
