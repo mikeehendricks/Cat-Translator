@@ -613,6 +613,21 @@ async function loadVisits(filter) {
   S.visits = d;
   const s = d.summary, t = s.totals;
 
+  /* An empty table is not the same as no traffic. The filter above hides bot
+     traffic by default and the summary counts everything, so when the two
+     disagree say why — and offer the one tap that shows them. */
+  const filtering = !!(f.day || f.country || f.q || f.ip);
+  const hiddenNote = (d.total === 0 && !filtering && !f.bots && t.inWindow > 0)
+    ? `<p class="tinies" style="margin:0 0 10px">Nothing is listed because every view in the last ${s.windowDays} days
+         counts as bot traffic (${t.inWindow} view${t.inWindow === 1 ? '' : 's'} — crawlers, monitors, curl, headless
+         browsers) and bot traffic is hidden.
+         <button class="plain" id="fShowBots" style="padding:2px 8px;margin-left:6px">Show them</button></p>`
+    : (d.total === 0 && filtering)
+    ? `<p class="tinies" style="margin:0 0 10px">No visit matches these filters, out of ${t.inWindow}
+         in the last ${s.windowDays} days.
+         <button class="plain" id="fClearFilters" style="padding:2px 8px;margin-left:6px">Clear them</button></p>`
+    : '';
+
   $('#tab-visits').innerHTML = `
     <div class="grid g4" style="margin-bottom:14px">
       <div class="stat"><b>${t.inWindow}</b><span>views, last ${s.windowDays} days</span></div>
@@ -638,6 +653,7 @@ async function loadVisits(filter) {
 
     <div class="card">
       <h2>${d.total} visit${d.total === 1 ? '' : 's'}${d.total > d.rows.length ? ` · showing ${d.rows.length}` : ''}</h2>
+      ${hiddenNote}
       <div style="overflow:auto;max-height:62vh">${visitsTable(d.rows, false)}</div>
     </div>
 
@@ -661,6 +677,10 @@ async function loadVisits(filter) {
     bots: $('#fBots').value === '1',
   });
   $('#fReset').onclick = () => loadVisits({});
+  const showBots = $('#fShowBots');
+  if (showBots) showBots.onclick = () => loadVisits(Object.assign({}, f, { bots: true }));
+  const clearFilters = $('#fClearFilters');
+  if (clearFilters) clearFilters.onclick = () => loadVisits({});
   $('#fCsv').onclick = () => {
     const qs2 = new URLSearchParams(qs); qs2.set('limit', '1000');
     window.location.href = '/api/admin/visits.csv?' + qs2.toString();
@@ -931,6 +951,7 @@ async function loadSettings() {
   let d;
   try { d = await api('overview'); } catch (e) { return toast(e.message, 'err'); }
   const s = d.settings;
+  const sv = d.server || {};
   S.settings = s;
   $('#tab-settings').innerHTML = `
     <div class="split">

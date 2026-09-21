@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.0.15
+
+- **The Settings tab renders again.** 1.0.14's note about where a proxy-trust choice is kept
+  referred to a variable that does not exist in that function (`sv`, which the Overview tab uses),
+  so rendering the tab threw and left the operator looking at a blank screen. The API answered 200,
+  every server-side check passed, and nothing in the log said a word.
+- **An empty table now explains itself.** The Visits tab hides bot traffic by default — crawler
+  hits, monitors, `curl`, headless browsers — while the summary counts everything, so a fresh
+  installation that has only been scanned showed "0 visits" above a table with nothing in it. That
+  state now says how many views are hidden and offers one tap to show them; a search that matches
+  nothing says that instead, and offers to clear the filters.
+- **`tools/test-panel.mjs` (32 checks) drives the panel the way an operator does.** It starts its
+  own installation, signs in through the panel's own form in jsdom, opens every tab, and reads what
+  is rendered: the visit rows with their provenance, the all-bot empty state, the filtered empty
+  state, the three-way proxy-trust control saving through to the store, and no tab rendering empty.
+  An API test cannot see a blank screen — this one can.
+
 ## 1.0.14
 
 - **A proxy-trust choice made in the panel is now actually kept.** 1.0.13 wrote it to

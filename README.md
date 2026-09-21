@@ -415,6 +415,7 @@ node tools/verify-bundle.mjs    # the same, through the shipped single file: 18/
 ```bash
 node tools/test-server.mjs                       # 127 checks: install, auth, visits, visitor addresses, updates, rollback
 node tools/test-ui.mjs                           # 92 checks: the app's UI, the interface guidelines, and the translate button
+node tools/test-panel.mjs                        # 32 checks: the admin panel, driven in jsdom (needs jsdom)
 node tools/test-installed.mjs http://127.0.0.1:8899   # verify a running installation over HTTP
 node tools/test-archive.mjs                      # 32 checks: the tar reader/writer the updater uses
 node tools/test-ownership.mjs                    # 36 checks: run as root, see Tests below
@@ -425,6 +426,10 @@ node server/selftest.js                          # the smoke test the updater ru
 installation owned by a *different* account, drives a root-run CLI command and a real update plus
 rollback against a stand-in GitHub, and asserts the service account can still read everything
 afterwards. It exists because that bug shipped once.
+
+`test-panel.mjs` starts its own installation, then loads `/admin` in jsdom, signs in through the
+panel's own form and opens every tab, because a template error renders a tab as a blank nothing
+while every API check still passes — which is how the Settings tab once shipped broken.
 
 `test-server.mjs` stands up a throwaway installation, a stand-in GitHub (a local HTTP server serving
 a tarball of the tree with the version bumped), and drives the real flows. It does so **with `tar`

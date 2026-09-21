@@ -28,6 +28,9 @@ jobs:
       - name: App UI test
         run: node tools/test-ui.mjs
 
+      - name: Admin panel test (every tab, rendered)
+        run: node tools/test-panel.mjs
+
       - name: The shipped single file still round-trips
         run: node tools/verify-bundle.mjs
 
