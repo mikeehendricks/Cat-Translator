@@ -377,7 +377,7 @@ node tools/test-server.mjs                       # 83 checks: install, auth, vis
 node tools/test-ui.mjs                           # 71 checks: the app's UI and the interface guidelines
 node tools/test-installed.mjs http://127.0.0.1:8899   # verify a running installation over HTTP
 node tools/test-archive.mjs                      # 32 checks: the tar reader/writer the updater uses
-node tools/test-ownership.mjs                    # 32 checks: run as root, see Tests below
+node tools/test-ownership.mjs                    # 36 checks: run as root, see Tests below
 node server/selftest.js                          # the smoke test the updater runs
 ```
 

@@ -9,7 +9,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { matchOwner, isRoot } = require('./fsowner');
+const { isRoot, giveTo, ownerOf, serviceOwner } = require('./fsowner');
 
 const SCHEMA = 1;
 
@@ -121,17 +121,20 @@ class Store {
     try {
       const dir = path.dirname(this.file);
       /* When root runs a CLI command the store must still end up belonging to the
-         service account, or the service cannot read it on the next start. Hand
-         the file (and a newly created directory) to whoever owns them already. */
+         service account, or the service cannot read it on the next start. Match
+         the neighbour when there is one; when the directory itself is being
+         created there is nothing to match, so ask who the service runs as. */
+      let owner = null;
       if (isRoot()) {
         const existed = fs.existsSync(dir);
+        owner = serviceOwner({ dataDir: dir }) || ownerOf(path.dirname(dir));
         fs.mkdirSync(dir, { recursive: true, mode: 0o750 });
-        if (!existed) matchOwner(dir, path.dirname(dir));
+        if (!existed) giveTo(dir, owner);
       }
       const tmp = `${this.file}.tmp-${process.pid}`;
       fs.writeFileSync(tmp, JSON.stringify(this.data), { mode: 0o600 });
       fs.renameSync(tmp, this.file);
-      if (isRoot()) matchOwner(this.file, dir);
+      if (isRoot()) giveTo(this.file, owner || ownerOf(dir));
     } catch (e) {
       const hint = (e.code === 'EACCES' || e.code === 'EPERM')
         ? `\n        the service user must be able to write ${path.dirname(this.file)} (sudo chown -R meow:meow ${path.dirname(this.file)})`

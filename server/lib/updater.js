@@ -28,7 +28,7 @@ const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
 const archiveUtil = require('./archive');
 const { Readable } = require('node:stream');
-const { matchOwner, matchOwnerTree, chownTree, ownerOf, isRoot } = require('./fsowner');
+const { chownTree, ownerOf, isRoot, serviceOwner, giveTo } = require('./fsowner');
 
 const PROTECTED = new Set(['.git', 'node_modules', 'data', '.env', 'local']);
 
@@ -239,16 +239,30 @@ class Updater {
 
   /** Backup the live tree into the versions store. Returns the backup dir. */
   /** Create a directory (and its parents) owned like the data directory. */
+  /**
+   * Owner for anything created under the data directory: whoever owns it now,
+   * or — when it is missing or root-owned, meaning we are about to be the ones
+   * creating it — whoever the service runs as. Matching the neighbour cannot
+   * work for the directory itself, and a root-owned data directory is a service
+   * that will not start.
+   */
+  dataOwner() {
+    const own = ownerOf(this.cfg.dataDir);
+    if (own && own.uid !== 0) return own;
+    return serviceOwner({ dataDir: this.cfg.dataDir, configPath: this.cfg.configPath }) || own;
+  }
+
   ensureDir(p) {
     fs.mkdirSync(p, { recursive: true });
     if (isRoot()) {
-      /* mkdir may have just created versions/ or staging/ as root, so fix those
-         too — not only the leaf — and then the leaf itself and anything in it. */
-      for (const d of [this.cfg.versionsDir, this.cfg.stagingDir]) {
-        if (fs.existsSync(d)) matchOwner(d, this.cfg.dataDir);
+      /* mkdir may have just created the data directory, versions/ or staging/
+         as root, so fix those too — not only the leaf — and then the leaf
+         itself and anything in it. */
+      const owner = this.dataOwner();
+      for (const d of [this.cfg.dataDir, this.cfg.versionsDir, this.cfg.stagingDir, p]) {
+        if (fs.existsSync(d)) giveTo(d, owner);
       }
-      matchOwner(p, this.cfg.dataDir);
-      matchOwnerTree(p, this.cfg.dataDir);
+      chownTree(p, owner);
     }
     return p;
   }
@@ -262,8 +276,9 @@ class Updater {
        read it back to roll back — so hand the whole thing to the data directory's
        owner, the directory itself included. */
     if (isRoot()) {
-      matchOwner(this.cfg.versionsDir, this.cfg.dataDir);
-      matchOwnerTree(dir, this.cfg.dataDir);
+      const owner = this.dataOwner();
+      giveTo(this.cfg.versionsDir, owner);
+      chownTree(dir, owner);
     }
     this.store.data.versions.push({
       version: cur.version,
@@ -570,7 +585,7 @@ class Updater {
       try {
         this.ensureDir(dir);
         copyTree(this.cfg.appDir, dir, {});
-        if (isRoot()) matchOwnerTree(dir, this.cfg.dataDir);
+        if (isRoot()) chownTree(dir, this.dataOwner());
         this.store.data.versions.push({ version: fileVersion, sha: '', dir, installedAt: Date.now(), kind: 'install' });
       } catch (e) {
         this.log('warn', `could not snapshot the installed tree: ${e.message}`);

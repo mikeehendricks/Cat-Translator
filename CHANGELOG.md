@@ -1,6 +1,20 @@
 # Changelog
 
-## 1.0.10
+## 1.0.11
+
+- **A root command that has to create the data directory now gives it to the service account.**
+  Ownership was preserved by matching the neighbour — right for a file written into an existing
+  directory, useless when the directory is the thing being created. If the data directory was gone
+  (deleted, or a fresh machine) and the first thing run was `sudo meow-translator …`, the directory
+  and its store came out owned by root, and the service then failed to start with `EACCES` on its own
+  store — which reads like the visits and credentials have vanished. The account is now looked for
+  directly when there is nothing to match: an explicit name, the application directory (the installer
+  gives it to the service), or the config file, which is deliberately root-owned and group-readable
+  by the service. `updater.ensureDir()` uses the same rule for `versions/` and `staging/`.
+  `tools/test-ownership.mjs` now runs a root command against a missing data directory and asserts the
+  result belongs to the service account and is readable by it (36 checks, from 32).
+
+## 1.0.11
 
 - **The updater no longer needs `tar`.** On some hosts the system tar cannot create files at all:
   every entry comes back `tar: <path>: Cannot open: Function not implemented`, which is `open(2)`

@@ -62,6 +62,74 @@ function chownTree(target, owner) {
   return true;
 }
 
+/**
+ * Who the service runs as, worked out from what is on the machine.
+ *
+ * matchOwner works by matching the neighbour, which is right for a file written
+ * into an existing directory — but there is no neighbour to match when the
+ * directory itself is the thing being created. A root-run command on a box whose
+ * data directory has gone missing would create it as root, and the service would
+ * then fail to start with EACCES on its own store.
+ *
+ * So the account is looked for directly, in order of how much it can be trusted:
+ * an explicit name, the application directory (the installer gives it to the
+ * service account), and the config file, which is deliberately root-owned and
+ * readable by the service's group.
+ */
+function passwdEntries() {
+  try {
+    return fs.readFileSync('/etc/passwd', 'utf8').split('\n').filter(Boolean).map(line => {
+      const [name, , uid, gid] = line.split(':');
+      return { name, uid: Number(uid), gid: Number(gid) };
+    }).filter(u => Number.isInteger(u.uid) && u.uid > 0);
+  } catch (e) {
+    return [];
+  }
+}
+
+function uidForUser(name) {
+  const entry = passwdEntries().find(u => u.name === name);
+  return entry ? { uid: entry.uid, gid: entry.gid } : null;
+}
+
+function userForGid(gid) {
+  const entry = passwdEntries().find(u => u.gid === gid);
+  return entry ? { uid: entry.uid, gid } : null;
+}
+
+function serviceOwner(opts) {
+  const options = opts || {};
+  const configPath = options.configPath || process.env.MEOW_CONFIG || '/etc/meow-translator/config.json';
+  const name = options.user || process.env.MEOW_SERVICE_USER;
+  if (name) {
+    const byName = uidForUser(name);
+    if (byName) return byName;
+  }
+  try {
+    const cfg = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    if (cfg && cfg.appDir) {
+      const own = ownerOf(cfg.appDir);
+      if (own && own.uid !== 0) return own;
+    }
+  } catch (e) { /* no config readable from here */ }
+  const confOwn = ownerOf(configPath);
+  if (confOwn && confOwn.gid !== 0) {
+    const byGroup = userForGid(confOwn.gid);
+    if (byGroup) return byGroup;
+  }
+  if (options.dataDir) {
+    const own = ownerOf(options.dataDir);
+    if (own && own.uid !== 0) return own;
+  }
+  return null;
+}
+
+/** Give a path to a known owner. No-op unless we are root and have an owner. */
+function giveTo(target, owner) {
+  if (!owner || !isRoot()) return false;
+  try { fs.chownSync(target, owner.uid, owner.gid); return true; } catch (e) { return false; }
+}
+
 /** matchOwner for a whole tree, files and directories alike. */
 function matchOwnerTree(target, refPath) {
   if (typeof process.getuid !== 'function' || process.getuid() !== 0) return false;
@@ -84,4 +152,7 @@ function matchOwnerTree(target, refPath) {
 /** True when this process is root, i.e. when the above matters. */
 const isRoot = () => typeof process.getuid === 'function' && process.getuid() === 0;
 
-module.exports = { matchOwner, matchOwnerTree, chownTree, ownerOf, isRoot };
+module.exports = {
+  matchOwner, matchOwnerTree, chownTree, ownerOf, isRoot,
+  serviceOwner, giveTo, uidForUser, userForGid,
+};

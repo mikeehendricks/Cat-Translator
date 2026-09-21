@@ -162,6 +162,42 @@ function runCli(args, extraEnv) {
 (async () => {
   console.log(`\n\x1b[1mOwnership regression test\x1b[0m  (this process runs as uid ${process.getuid()}, files must end up ${SERVICE_UID}:${SERVICE_GID})\n`);
   prepare();
+
+/* ---------------------------------------------------------------------------
+   A root command that has to create the data directory itself.
+
+   matchOwner matches the neighbour, and there is no neighbour to match when the
+   directory is what is being created: the file comes out root-owned and the
+   service cannot read its own store, which reads like the data has vanished.
+   This is that case, run against a missing data directory, with the config file
+   pointing at an application directory owned by the service account.
+   ------------------------------------------------------------------------ */
+{
+  const CLI = path.join(ROOT, 'bin', 'meow-translator');
+  const fresh = path.join(TMP, 'fresh-data');
+  const confPath = path.join(TMP, 'fresh-config.json');
+  fs.rmSync(fresh, { recursive: true, force: true });
+  fs.writeFileSync(confPath, JSON.stringify({ appDir: APP, dataDir: fresh, host: '127.0.0.1', port: 18999 }));
+  const run = spawnSync('node', [CLI, 'versions'], {
+    encoding: 'utf8',
+    env: Object.assign({}, process.env, { MEOW_CONFIG: confPath, MEOW_DATA_DIR: fresh, MEOW_APP_DIR: APP }),
+  });
+  check('a root command on a missing data directory still works', run.status === 0,
+    (run.stderr || run.stdout || '').trim().slice(0, 200));
+  if (fs.existsSync(path.join(fresh, 'store.json'))) {
+    expectService('the data directory it created belongs to the service', fresh);
+    expectService('and so does the store inside it', path.join(fresh, 'store.json'));
+  } else {
+    check('the store was created', false, 'no store.json in ' + fresh);
+    check('and belongs to the service', false, 'nothing to check');
+  }
+  /* and the same store is readable when the service runs as that account */
+  const asService = spawnSync('sudo', ['-u', `#${SERVICE_UID}`, '-g', `#${SERVICE_GID}`, 'test', '-r', path.join(fresh, 'store.json')],
+    { encoding: 'utf8' });
+  check('the service account can read it', asService.status === 0,
+    (asService.stderr || '').trim().slice(0, 160));
+}
+
   const tarball = buildPayload();
   const gh = await startFakeGitHub(tarball);
 
